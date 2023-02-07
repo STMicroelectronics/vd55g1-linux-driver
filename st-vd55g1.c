@@ -48,10 +48,10 @@
 #define VD55G1_REG_ADDR_MASK				0xffff
 
 #define VD55G1_REG_MODEL_ID				VD55G1_REG_16BIT(0x0000)
-#define VD55G1_MODEL_ID					0x4730
-#define VD55G1_REG_FWPATCH_REVISION			VD55G1_REG_16BIT(0x0022)
+#define VD55G1_MODEL_ID					0x4731
+#define VD55G1_REG_FWPATCH_REVISION			VD55G1_REG_16BIT(0x0012)
 #define VD55G1_REG_FWPATCH_START_ADDR			VD55G1_REG_8BIT(0x2000)
-#define VD55G1_REG_SYSTEM_FSM				VD55G1_REG_8BIT(0x002c)
+#define VD55G1_REG_SYSTEM_FSM				VD55G1_REG_8BIT(0x001c)
 #define VD55G1_SYSTEM_FSM_READY_TO_BOOT			0x01
 #define VD55G1_SYSTEM_FSM_SW_STBY			0x02
 #define VD55G1_SYSTEM_FSM_STREAMING			0x03
@@ -1747,17 +1747,18 @@ static int vd55g1_power_on(struct device *dev)
 		goto disable_clock;
 	}
 
-	ret = vd55g1_boot(sensor);
-	if (ret) {
-		dev_err(&client->dev, "sensor boot failed %d", ret);
-		goto disable_clock;
-	}
+	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY,
+				VD55G1_TIMEOUT_MS);
+	if (ret)
+		return ret;
 
+#if 0
 	ret = vd55g1_configure(sensor);
 	if (ret) {
 		dev_err(&client->dev, "sensor configuration failed %d", ret);
 		goto disable_clock;
 	}
+#endif
 
 	return 0;
 
@@ -1964,10 +1965,12 @@ static int vd55g1_probe(struct i2c_client *client)
 
 	mutex_init(&sensor->lock);
 
+#if 0
 	ret = vd55g1_update_vblank(sensor, VD55G1_FRAME_LENGTH_DEF -
 				   sensor->current_mode->crop.height);
 	if (ret)
 		goto error_power_off;
+#endif
 
 	ret = vd55g1_init_controls(sensor);
 	if (ret) {
