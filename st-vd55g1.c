@@ -88,10 +88,10 @@
 #define VD55G1_EXP_MODE_FREEZE				1
 #define VD55G1_EXP_MODE_MANUAL				2
 #define VD55G1_REG_FRAME_LENGTH				VD55G1_REG_16BIT(0x0458)
-#define VD55G1_REG_ROI_X_START				VD55G1_REG_16BIT(0x045e)
-#define VD55G1_REG_ROI_X_END				VD55G1_REG_16BIT(0x0460)
-#define VD55G1_REG_ROI_Y_START				VD55G1_REG_16BIT(0x0462)
-#define VD55G1_REG_ROI_Y_END				VD55G1_REG_16BIT(0x0464)
+#define VD55G1_REG_ROI_X_START				VD55G1_REG_16BIT(0x0514)
+#define VD55G1_REG_ROI_X_WIDTH				VD55G1_REG_16BIT(0x0516)
+#define VD55G1_REG_ROI_Y_START				VD55G1_REG_16BIT(0x0510)
+#define VD55G1_REG_ROI_Y_HEIGHT				VD55G1_REG_16BIT(0x0512)
 #define VD55G1_REG_Y_START				VD55G1_REG_16BIT(0x045a)
 #define VD55G1_REG_Y_END				VD55G1_REG_16BIT(0x045c)
 #define VD55G1_REG_AE_ROI_START_H			VD55G1_REG_16BIT(0x0436)
@@ -102,7 +102,7 @@
 #define VD55G1_REG_GPIO_1_CTRL				VD55G1_REG_8BIT(0x0468)
 #define VD55G1_REG_GPIO_2_CTRL				VD55G1_REG_8BIT(0x0469)
 #define VD55G1_REG_GPIO_3_CTRL				VD55G1_REG_8BIT(0x046a)
-#define VD55G1_REG_READOUT_CTRL				VD55G1_REG_8BIT(0x047a)
+#define VD55G1_REG_READOUT_CTRL				VD55G1_REG_8BIT(0x0578)
 #define VD55G1_REG_DARKCAL_CTRL				VD55G1_REG_8BIT(0x032c)
 #define VD55G1_DARKCAL_BYPASS				0
 #define VD55G1_DARKCAL_AUTO				1
@@ -895,22 +895,22 @@ static int vd55g1_apply_frame_format(struct vd55g1_dev *sensor)
 	vd55g1_write_reg(sensor, VD55G1_REG_READOUT_CTRL,
 			 sensor->current_mode->bin_mode, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_ROI_X_START, crop->left, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_ROI_X_END,
-			 crop->left + crop->width - 1, &ret);
+	vd55g1_write_reg(sensor, VD55G1_REG_ROI_X_WIDTH, crop->width, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_ROI_Y_START, crop->top, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_ROI_Y_END,
-			 crop->top + crop->height - 1, &ret);
+	vd55g1_write_reg(sensor, VD55G1_REG_ROI_Y_HEIGHT, crop->height, &ret);
 
 	/*
 	 * Use the same auto exposure crop as the image crop, performing auto
 	 * exposure computation only on image boundaries.
 	 */
+#if 0
 	vd55g1_write_reg(sensor, VD55G1_REG_AE_ROI_START_H, crop->left, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_AE_ROI_END_H,
 			 crop->left + crop->width - 1, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_AE_ROI_START_V, crop->top, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_AE_ROI_END_V,
 			 crop->top + crop->height - 1, &ret);
+#endif
 
 	/*
 	 * Only aquire lines required for this image format, optimizing power
