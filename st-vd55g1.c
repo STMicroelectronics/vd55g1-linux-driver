@@ -59,9 +59,9 @@
 #define VD55G1_REG_BOOT					VD55G1_REG_8BIT(0x0200)
 #define VD55G1_BOOT_BOOT				1
 #define VD55G1_BOOT_PATCH_SETUP				2
-#define VD55G1_REG_SW_STBY				VD55G1_REG_8BIT(0x0201)
-#define VD55G1_SW_STBY_START_STREAM			1
-#define VD55G1_SW_STBY_THSENS_READ			4
+#define VD55G1_REG_STBY					VD55G1_REG_8BIT(0x0201)
+#define VD55G1_STBY_START_STREAM			1
+#define VD55G1_STBY_THSENS_READ			4
 #define VD55G1_REG_STREAMING				VD55G1_REG_8BIT(0x0202)
 #define VD55G1_STREAMING_STOP_STREAM			1
 #define VD55G1_REG_EXT_CLOCK				VD55G1_REG_32BIT(0x0220)
@@ -691,11 +691,11 @@ static int vd55g1_get_temp_stream_disable(struct vd55g1_dev *sensor, int *temp)
 	int ret;
 
 	/* request temperature read */
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_SW_STBY,
-			       VD55G1_SW_STBY_THSENS_READ, NULL);
+	ret = vd55g1_write_reg(sensor, VD55G1_REG_STBY,
+			       VD55G1_STBY_THSENS_READ, NULL);
 	if (ret)
 		return ret;
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_SW_STBY, 0, VD55G1_TIMEOUT_MS);
+	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, VD55G1_TIMEOUT_MS);
 	if (ret)
 		return ret;
 
@@ -976,9 +976,11 @@ static int vd55g1_stream_enable(struct vd55g1_dev *sensor)
 	/* pm_runtime_get_sync() can return 1 as a valid return code */
 	ret = 0;
 
+#if 0
 	ret = vd55g1_set_gpios(sensor);
 	if (ret)
 		goto err_rpm_put;
+#endif
 
 	vd55g1_write_reg(sensor, VD55G1_REG_FORMAT_CTRL,
 			 get_bpp_by_code(sensor->fmt.code), &ret);
@@ -991,16 +993,18 @@ static int vd55g1_stream_enable(struct vd55g1_dev *sensor)
 	if (ret)
 		goto err_rpm_put;
 
+#if 0
 	ret = vd55g1_apply_settings(sensor);
 	if (ret)
 		goto err_rpm_put;
+#endif
 
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_SW_STBY,
-			       VD55G1_SW_STBY_START_STREAM, NULL);
+	ret = vd55g1_write_reg(sensor, VD55G1_REG_STBY,
+			       VD55G1_STBY_START_STREAM, NULL);
 	if (ret)
 		goto err_rpm_put;
 
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_SW_STBY, 0, VD55G1_TIMEOUT_MS);
+	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, VD55G1_TIMEOUT_MS);
 	if (ret)
 		goto err_rpm_put;
 
