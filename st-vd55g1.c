@@ -70,7 +70,7 @@
 #define VD55G1_REG_FORMAT_CTRL				VD55G1_REG_8BIT(0x030a)
 #define VD55G1_REG_OIF_CTRL				VD55G1_REG_16BIT(0x030c)
 #define VD55G1_REG_OIF_IMG_CTRL				VD55G1_REG_8BIT(0x030f)
-#define VD55G1_REG_CLK_PLL_MIPI				VD55G1_REG_32BIT(0x0224)
+#define VD55G1_REG_MIPI_DATA_RATE			VD55G1_REG_32BIT(0x0224)
 #define VD55G1_REG_PATGEN_CTRL				VD55G1_REG_16BIT(0x0400)
 #define VD55G1_PATGEN_TYPE_SHIFT			4
 #define VD55G1_PATGEN_ENABLE				BIT(0)
@@ -1175,26 +1175,6 @@ static int vd55g1_patch(struct vd55g1_dev *sensor)
 	return 0;
 }
 
-static int vd55g1_boot(struct vd55g1_dev *sensor)
-{
-	int ret;
-
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_BOOT, VD55G1_BOOT_BOOT, NULL);
-	if (ret)
-		return ret;
-
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_BOOT, 0, VD55G1_TIMEOUT_MS);
-	if (ret)
-		return ret;
-
-	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY,
-				VD55G1_TIMEOUT_MS);
-	if (ret)
-		return ret;
-
-	return 0;
-}
-
 static int vd55g1_configure(struct vd55g1_dev *sensor)
 {
 	/* Double data rate */
@@ -1212,15 +1192,10 @@ static int vd55g1_configure(struct vd55g1_dev *sensor)
 		return line_length;
 	sensor->line_length = line_length;
 
-	/*
-	 * PLL_PREDIV and PLL_MULT are not accessible. We rely on the firmware
-	 * to set the correct multiplier for the clock. Hence we don't do
-	 * anything more here.
-	 */
 	vd55g1_write_reg(sensor, VD55G1_REG_EXT_CLOCK, sensor->clk_freq, &ret);
 
 	vd55g1_write_reg(sensor, VD55G1_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_CLK_PLL_MIPI, mipi_bps, &ret);
+	vd55g1_write_reg(sensor, VD55G1_REG_MIPI_DATA_RATE, mipi_bps, &ret);
 
 	return ret;
 }
@@ -1752,13 +1727,11 @@ static int vd55g1_power_on(struct device *dev)
 	if (ret)
 		return ret;
 
-#if 0
 	ret = vd55g1_configure(sensor);
 	if (ret) {
 		dev_err(&client->dev, "sensor configuration failed %d", ret);
 		goto disable_clock;
 	}
-#endif
 
 	return 0;
 
@@ -1970,13 +1943,13 @@ static int vd55g1_probe(struct i2c_client *client)
 				   sensor->current_mode->crop.height);
 	if (ret)
 		goto error_power_off;
-#endif
 
 	ret = vd55g1_init_controls(sensor);
 	if (ret) {
 		dev_err(&client->dev, "controls initialization failed %d", ret);
 		goto error_power_off;
 	}
+#endif
 
 	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
 	if (ret) {
