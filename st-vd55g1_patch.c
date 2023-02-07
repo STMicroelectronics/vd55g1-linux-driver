@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Driver for vd55g1 sensor familly
+ * Driver for VD55G1 global shutter sensor family driver
  *
- * Copyright (C) STMicroelectronics SA 2019
- * Authors: Mickael Guene <mickael.guene@st.com>
- *          for STMicroelectronics.
- *
- *
+ * Copyright (C) 2023 STMicroelectronics SA
  */
 
 #define VD55G1_FWPATCH_REVISION_MAJOR	1
