@@ -111,7 +111,7 @@
 #define VD55G1_DUSTER_DISABLE				0
 #define VD55G1_DUSTER_DYN_ENABLE			BIT(1)
 #define VD55G1_DUSTER_RING_ENABLE			BIT(4)
-#define VD55G1_REG_DARKCAL_PEDESTAL			VD55G1_REG_8BIT(0x0416)
+#define VD55G1_REG_DARKCAL_PEDESTAL			VD55G1_REG_8BIT(0x0526)
 #define VD55G1_REG_AE_TARGET_PERCENTAGE			VD55G1_REG_8BIT(0x0440)
 #define VD55G1_REG_VT_CTRL				VD55G1_REG_8BIT(0x0309)
 #define VD55G1_VT_SLAVE_GPIO				1
@@ -878,14 +878,12 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 		return ret;
 #endif
 
-#if 0
 	vd55g1_write_reg(sensor, VD55G1_REG_ORIENTATION,
 			 sensor->hflip | (sensor->vflip << 1), &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_DARKCAL_PEDESTAL,
 			 sensor->darkcal_pedestal, &ret);
 	if (ret)
 		return ret;
-#endif
 
 #if 0
 	ret = vd55g1_apply_patgen(sensor);
