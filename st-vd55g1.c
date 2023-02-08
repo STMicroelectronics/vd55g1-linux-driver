@@ -83,7 +83,7 @@
 #define VD55G1_REG_AE_COLDSTART_COARSE_EXPOSURE		VD55G1_REG_16BIT(0x042e)
 #define VD55G1_REG_AE_COLDSTART_ANALOG_GAIN		VD55G1_REG_8BIT(0x0430)
 #define VD55G1_REG_AE_COLDSTART_DIGITAL_GAIN		VD55G1_REG_16BIT(0x0432)
-#define VD55G1_REG_EXP_MODE				VD55G1_REG_8BIT(0x044c)
+#define VD55G1_REG_EXP_MODE				VD55G1_REG_8BIT(0x0500)
 #define VD55G1_EXP_MODE_AUTO				0
 #define VD55G1_EXP_MODE_FREEZE				1
 #define VD55G1_EXP_MODE_MANUAL				2
@@ -851,14 +851,17 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 {
 	int ret;
 
+#if 0
 	ret = vd55g1_apply_framelength(sensor);
 	if (ret)
 		return ret;
+#endif
 
 	ret = vd55g1_apply_exposure_auto(sensor);
 	if (ret)
 		return ret;
 
+#if 0
 	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_COARSE_EXPOSURE,
 			 sensor->manual_expo, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
@@ -867,21 +870,28 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 			       sensor->digital_gain, &ret);
 	if (ret)
 		return ret;
+#endif
 
+#if 0
 	ret = vd55g1_apply_cold_start(sensor);
 	if (ret)
 		return ret;
+#endif
 
+#if 0
 	vd55g1_write_reg(sensor, VD55G1_REG_ORIENTATION,
 			 sensor->hflip | (sensor->vflip << 1), &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_DARKCAL_PEDESTAL,
 			 sensor->darkcal_pedestal, &ret);
 	if (ret)
 		return ret;
+#endif
 
+#if 0
 	ret = vd55g1_apply_patgen(sensor);
 	if (ret)
 		return ret;
+#endif
 
 
 	return 0;
@@ -993,11 +1003,9 @@ static int vd55g1_stream_enable(struct vd55g1_dev *sensor)
 	if (ret)
 		goto err_rpm_put;
 
-#if 0
 	ret = vd55g1_apply_settings(sensor);
 	if (ret)
 		goto err_rpm_put;
-#endif
 
 	ret = vd55g1_write_reg(sensor, VD55G1_REG_STBY,
 			       VD55G1_STBY_START_STREAM, NULL);
