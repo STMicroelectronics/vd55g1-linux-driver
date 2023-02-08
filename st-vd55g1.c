@@ -1948,7 +1948,6 @@ static int vd55g1_probe(struct i2c_client *client)
 
 	mutex_init(&sensor->lock);
 
-#if 0
 	ret = vd55g1_update_vblank(sensor, VD55G1_FRAME_LENGTH_DEF -
 				   sensor->current_mode->crop.height);
 	if (ret)
@@ -1959,7 +1958,6 @@ static int vd55g1_probe(struct i2c_client *client)
 		dev_err(&client->dev, "controls initialization failed %d", ret);
 		goto error_power_off;
 	}
-#endif
 
 	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
 	if (ret) {
