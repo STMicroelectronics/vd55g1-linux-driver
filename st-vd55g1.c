@@ -861,7 +861,6 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 	if (ret)
 		return ret;
 
-#if 0
 	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_COARSE_EXPOSURE,
 			 sensor->manual_expo, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
@@ -870,7 +869,6 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 			       sensor->digital_gain, &ret);
 	if (ret)
 		return ret;
-#endif
 
 #if 0
 	ret = vd55g1_apply_cold_start(sensor);
