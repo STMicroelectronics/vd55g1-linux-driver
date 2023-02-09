@@ -94,10 +94,6 @@
 #define VD55G1_REG_ROI_Y_HEIGHT				VD55G1_REG_16BIT(0x0512)
 #define VD55G1_REG_Y_START				VD55G1_REG_16BIT(0x045a)
 #define VD55G1_REG_Y_END				VD55G1_REG_16BIT(0x045c)
-#define VD55G1_REG_AE_ROI_START_H			VD55G1_REG_16BIT(0x0436)
-#define VD55G1_REG_AE_ROI_START_V			VD55G1_REG_16BIT(0x0438)
-#define VD55G1_REG_AE_ROI_END_H				VD55G1_REG_16BIT(0x043a)
-#define VD55G1_REG_AE_ROI_END_V				VD55G1_REG_16BIT(0x043c)
 #define VD55G1_REG_GPIO_0_CTRL				VD55G1_REG_8BIT(0x051d)
 #define VD55G1_REG_GPIO_1_CTRL				VD55G1_REG_8BIT(0x051e)
 #define VD55G1_REG_GPIO_2_CTRL				VD55G1_REG_8BIT(0x051f)
@@ -897,19 +893,6 @@ static int vd55g1_apply_frame_format(struct vd55g1_dev *sensor)
 	vd55g1_write_reg(sensor, VD55G1_REG_ROI_X_WIDTH, crop->width, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_ROI_Y_START, crop->top, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_ROI_Y_HEIGHT, crop->height, &ret);
-
-	/*
-	 * Use the same auto exposure crop as the image crop, performing auto
-	 * exposure computation only on image boundaries.
-	 */
-#if 0
-	vd55g1_write_reg(sensor, VD55G1_REG_AE_ROI_START_H, crop->left, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_AE_ROI_END_H,
-			 crop->left + crop->width - 1, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_AE_ROI_START_V, crop->top, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_AE_ROI_END_V,
-			 crop->top + crop->height - 1, &ret);
-#endif
 
 	/*
 	 * Only aquire lines required for this image format, optimizing power
