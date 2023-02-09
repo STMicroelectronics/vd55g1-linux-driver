@@ -87,7 +87,7 @@
 #define VD55G1_EXP_MODE_AUTO				0
 #define VD55G1_EXP_MODE_FREEZE				1
 #define VD55G1_EXP_MODE_MANUAL				2
-#define VD55G1_REG_FRAME_LENGTH				VD55G1_REG_16BIT(0x0458)
+#define VD55G1_REG_FRAME_LENGTH				VD55G1_REG_16BIT(0x050c)
 #define VD55G1_REG_ROI_X_START				VD55G1_REG_16BIT(0x0514)
 #define VD55G1_REG_ROI_X_WIDTH				VD55G1_REG_16BIT(0x0516)
 #define VD55G1_REG_ROI_Y_START				VD55G1_REG_16BIT(0x0510)
@@ -842,11 +842,9 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 {
 	int ret;
 
-#if 0
 	ret = vd55g1_apply_framelength(sensor);
 	if (ret)
 		return ret;
-#endif
 
 	ret = vd55g1_apply_exposure_auto(sensor);
 	if (ret)
