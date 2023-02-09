@@ -71,7 +71,7 @@
 #define VD55G1_REG_OIF_CTRL				VD55G1_REG_16BIT(0x030c)
 #define VD55G1_REG_OIF_IMG_CTRL				VD55G1_REG_8BIT(0x030f)
 #define VD55G1_REG_MIPI_DATA_RATE			VD55G1_REG_32BIT(0x0224)
-#define VD55G1_REG_PATGEN_CTRL				VD55G1_REG_16BIT(0x0400)
+#define VD55G1_REG_PATGEN_CTRL				VD55G1_REG_16BIT(0x0304)
 #define VD55G1_PATGEN_TYPE_SHIFT			4
 #define VD55G1_PATGEN_ENABLE				BIT(0)
 #define VD55G1_REG_MANUAL_ANALOG_GAIN			VD55G1_REG_8BIT(0x0501)
@@ -138,11 +138,6 @@
 
 static const char * const vd55g1_test_pattern_menu[] = {
 	"Disabled",
-	"Solid",
-	"Colorbar",
-	"Gradbar",
-	"Hgrey",
-	"Vgrey",
 	"Dgrey",
 	"PN28",
 };
@@ -574,7 +569,7 @@ static int vd55g1_get_regulators(struct vd55g1_dev *sensor)
 static int vd55g1_apply_patgen(struct vd55g1_dev *sensor)
 {
 	static const u8 index2val[] = {
-		0x0, 0x0, 0x8, 0x10, 0x20, 0x21, 0x22, 0x28
+		0x0, 0x22, 0x28
 	};
 	u32 pattern = index2val[sensor->pattern];
 	u32 reg = pattern << VD55G1_PATGEN_TYPE_SHIFT;
@@ -883,11 +878,9 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 	if (ret)
 		return ret;
 
-#if 0
 	ret = vd55g1_apply_patgen(sensor);
 	if (ret)
 		return ret;
-#endif
 
 
 	return 0;
