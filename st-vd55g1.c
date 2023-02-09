@@ -98,10 +98,10 @@
 #define VD55G1_REG_AE_ROI_START_V			VD55G1_REG_16BIT(0x0438)
 #define VD55G1_REG_AE_ROI_END_H				VD55G1_REG_16BIT(0x043a)
 #define VD55G1_REG_AE_ROI_END_V				VD55G1_REG_16BIT(0x043c)
-#define VD55G1_REG_GPIO_0_CTRL				VD55G1_REG_8BIT(0x0467)
-#define VD55G1_REG_GPIO_1_CTRL				VD55G1_REG_8BIT(0x0468)
-#define VD55G1_REG_GPIO_2_CTRL				VD55G1_REG_8BIT(0x0469)
-#define VD55G1_REG_GPIO_3_CTRL				VD55G1_REG_8BIT(0x046a)
+#define VD55G1_REG_GPIO_0_CTRL				VD55G1_REG_8BIT(0x051d)
+#define VD55G1_REG_GPIO_1_CTRL				VD55G1_REG_8BIT(0x051e)
+#define VD55G1_REG_GPIO_2_CTRL				VD55G1_REG_8BIT(0x051f)
+#define VD55G1_REG_GPIO_3_CTRL				VD55G1_REG_8BIT(0x0520)
 #define VD55G1_REG_READOUT_CTRL				VD55G1_REG_8BIT(0x0578)
 #define VD55G1_REG_DARKCAL_CTRL				VD55G1_REG_8BIT(0x032a)
 #define VD55G1_DARKCAL_BYPASS				0
@@ -975,11 +975,9 @@ static int vd55g1_stream_enable(struct vd55g1_dev *sensor)
 	/* pm_runtime_get_sync() can return 1 as a valid return code */
 	ret = 0;
 
-#if 0
 	ret = vd55g1_set_gpios(sensor);
 	if (ret)
 		goto err_rpm_put;
-#endif
 
 	vd55g1_write_reg(sensor, VD55G1_REG_FORMAT_CTRL,
 			 get_bpp_by_code(sensor->fmt.code), &ret);
