@@ -88,12 +88,10 @@
 #define VD55G1_EXP_MODE_FREEZE				1
 #define VD55G1_EXP_MODE_MANUAL				2
 #define VD55G1_REG_FRAME_LENGTH				VD55G1_REG_16BIT(0x050c)
-#define VD55G1_REG_ROI_X_START				VD55G1_REG_16BIT(0x0514)
-#define VD55G1_REG_ROI_X_WIDTH				VD55G1_REG_16BIT(0x0516)
-#define VD55G1_REG_ROI_Y_START				VD55G1_REG_16BIT(0x0510)
-#define VD55G1_REG_ROI_Y_HEIGHT				VD55G1_REG_16BIT(0x0512)
-#define VD55G1_REG_Y_START				VD55G1_REG_16BIT(0x045a)
-#define VD55G1_REG_Y_END				VD55G1_REG_16BIT(0x045c)
+#define VD55G1_REG_X_START				VD55G1_REG_16BIT(0x0514)
+#define VD55G1_REG_X_WIDTH				VD55G1_REG_16BIT(0x0516)
+#define VD55G1_REG_Y_START				VD55G1_REG_16BIT(0x0510)
+#define VD55G1_REG_Y_HEIGHT				VD55G1_REG_16BIT(0x0512)
 #define VD55G1_REG_GPIO_0_CTRL				VD55G1_REG_8BIT(0x051d)
 #define VD55G1_REG_GPIO_1_CTRL				VD55G1_REG_8BIT(0x051e)
 #define VD55G1_REG_GPIO_2_CTRL				VD55G1_REG_8BIT(0x051f)
@@ -887,20 +885,10 @@ static int vd55g1_apply_frame_format(struct vd55g1_dev *sensor)
 
 	vd55g1_write_reg(sensor, VD55G1_REG_READOUT_CTRL,
 			 sensor->current_mode->bin_mode, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_ROI_X_START, crop->left, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_ROI_X_WIDTH, crop->width, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_ROI_Y_START, crop->top, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_ROI_Y_HEIGHT, crop->height, &ret);
-
-	/*
-	 * Only aquire lines required for this image format, optimizing power
-	 * usage
-	 */
-#if 0
-	vd55g1_write_reg(sensor, VD55G1_REG_Y_START, crop->top - 50, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_Y_END,
-			 crop->top + crop->height - 1, &ret);
-#endif
+	vd55g1_write_reg(sensor, VD55G1_REG_X_START, crop->left, &ret);
+	vd55g1_write_reg(sensor, VD55G1_REG_X_WIDTH, crop->width, &ret);
+	vd55g1_write_reg(sensor, VD55G1_REG_Y_START, crop->top, &ret);
+	vd55g1_write_reg(sensor, VD55G1_REG_Y_HEIGHT, crop->height, &ret);
 
 	return ret;
 }
