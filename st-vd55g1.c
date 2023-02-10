@@ -123,6 +123,8 @@
 #define VD55G1_DARKCAL_PEDESTAL_DEF			0x40
 #define VD55G1_EXPO_MAX_TERM				64
 #define VD55G1_EXPO_DEF					200
+#define VD55G0_LINE_LENGTH_SLOW				1200
+#define VD55G0_LINE_LENGTH_FAST				1128
 
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
@@ -1147,7 +1149,6 @@ static int vd55g1_configure(struct vd55g1_dev *sensor)
 {
 	/* Double data rate */
 	u32 mipi_bps = link_freq[0] * 2;
-	int line_length;
 	int ret = 0;
 
 	/* Frequency to data rate is 1:1 ratio for MIPI */
@@ -1155,10 +1156,10 @@ static int vd55g1_configure(struct vd55g1_dev *sensor)
 	/* Video timing ISP path (pixel clock)  requires 804/5 mhz = 160 mhz */
 	sensor->pclk = mipi_bps / 5;
 
-	line_length = vd55g1_read_reg(sensor, VD55G1_REG_LINE_LENGTH);
-	if (line_length < 0)
-		return line_length;
-	sensor->line_length = line_length;
+	sensor->line_length = VD55G0_LINE_LENGTH_FAST;
+	if (mipi_bps < 900 * HZ_PER_MHZ)
+		sensor->line_length = VD55G0_LINE_LENGTH_SLOW;
+	vd55g1_write_reg(sensor, VD55G1_REG_LINE_LENGTH, sensor->line_length, &ret);
 
 	vd55g1_write_reg(sensor, VD55G1_REG_EXT_CLOCK, sensor->clk_freq, &ret);
 
