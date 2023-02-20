@@ -110,13 +110,13 @@
 #define VD55G1_REG_VT_CTRL				VD55G1_REG_8BIT(0x0309)
 #define VD55G1_VT_SLAVE_GPIO				1
 
-#define VD55G1_WIDTH					644
-#define VD55G1_HEIGHT					604
+#define VD55G1_WIDTH					804
+#define VD55G1_HEIGHT					704
 #define VD55G1_DEFAULT_MODE				1
 #define VD55G1_WRITE_MULTIPLE_CHUNK_MAX			16
 #define VD55G1_NB_GPIOS					4
 #define VD55G1_NB_POLARITIES				3
-#define VD55G1_MIN_FRAME_LENGTH				(605 + 76)
+#define VD55G1_MIN_VBLANK				86
 #define VD55G1_FRAME_LENGTH_DEF				1980 /* 60 fps */
 #define VD55G1_TIMEOUT_MS				500
 #define VD55G1_MEDIA_BUS_FMT_DEF			MEDIA_BUS_FMT_Y8_1X8
@@ -225,13 +225,24 @@ static const struct vd55g1_mode_info vd55g1_mode_data[] = {
 		},
 	},
 	{
-		.width = 640,
+		.width = 800,
+		.height = VD55G1_HEIGHT,
+		.bin_mode = VD55G1_BIN_MODE_NORMAL,
+		.crop = {
+			.left = 2,
+			.top = 0,
+			.width = 800,
+			.height = VD55G1_HEIGHT,
+		},
+	},
+	{
+		.width = 800,
 		.height = 600,
 		.bin_mode = VD55G1_BIN_MODE_NORMAL,
 		.crop = {
 			.left = 2,
-			.top = 2,
-			.width = 640,
+			.top = 52,
+			.width = 800,
 			.height = 600,
 		},
 	},
@@ -240,8 +251,8 @@ static const struct vd55g1_mode_info vd55g1_mode_data[] = {
 		.height = 480,
 		.bin_mode = VD55G1_BIN_MODE_NORMAL,
 		.crop = {
-			.left = 2,
-			.top = 62,
+			.left = 82,
+			.top = 112,
 			.width = 640,
 			.height = 480,
 		},
@@ -251,8 +262,8 @@ static const struct vd55g1_mode_info vd55g1_mode_data[] = {
 		.height = 240,
 		.bin_mode = VD55G1_BIN_MODE_DIGITAL_X2,
 		.crop = {
-			.left = 2,
-			.top = 62,
+			.left = 82,
+			.top = 112,
 			.width = 640,
 			.height = 480,
 		},
@@ -666,8 +677,7 @@ static int vd55g1_apply_framelength(struct vd55g1_dev *sensor)
 
 static int vd55g1_update_vblank(struct vd55g1_dev *sensor, u16 vblank)
 {
-	sensor->vblank_min = VD55G1_MIN_FRAME_LENGTH -
-			     sensor->current_mode->crop.height;
+	sensor->vblank_min = VD55G1_MIN_VBLANK;
 	sensor->vblank = vblank;
 	sensor->frame_length = sensor->current_mode->crop.height +
 			       sensor->vblank;
