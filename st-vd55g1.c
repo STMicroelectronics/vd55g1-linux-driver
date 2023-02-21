@@ -77,12 +77,11 @@
 #define VD55G1_REG_MANUAL_ANALOG_GAIN			VD55G1_REG_8BIT(0x0501)
 #define VD55G1_REG_MANUAL_COARSE_EXPOSURE		VD55G1_REG_16BIT(0x0502)
 #define VD55G1_REG_MANUAL_DIGITAL_GAIN			VD55G1_REG_16BIT(0x0504)
-#define VD55G1_REG_APPLIED_COARSE_EXPOSURE		VD55G1_REG_16BIT(0x0064)
-#define VD55G1_REG_APPLIED_ANALOG_GAIN			VD55G1_REG_8BIT(0x0066)
-#define VD55G1_REG_APPLIED_DIGITAL_GAIN			VD55G1_REG_16BIT(0x0068)
-#define VD55G1_REG_AE_COLDSTART_COARSE_EXPOSURE		VD55G1_REG_16BIT(0x042e)
-#define VD55G1_REG_AE_COLDSTART_ANALOG_GAIN		VD55G1_REG_8BIT(0x0430)
-#define VD55G1_REG_AE_COLDSTART_DIGITAL_GAIN		VD55G1_REG_16BIT(0x0432)
+#define VD55G1_REG_APPLIED_COARSE_EXPOSURE		VD55G1_REG_16BIT(0x0110)
+#define VD55G1_REG_APPLIED_ANALOG_GAIN			VD55G1_REG_16BIT(0x0112)
+#define VD55G1_REG_APPLIED_DIGITAL_GAIN			VD55G1_REG_16BIT(0x0114)
+#define VD55G1_REG_AE_FORCE_COLDSTART			VD55G1_REG_16BIT(0x0308)
+#define VD55G1_REG_AE_COLDSTART_EXP_TIME		VD55G1_REG_32BIT(0x0374)
 #define VD55G1_REG_EXP_MODE				VD55G1_REG_8BIT(0x0500)
 #define VD55G1_EXP_MODE_AUTO				0
 #define VD55G1_EXP_MODE_FREEZE				1
@@ -836,14 +835,23 @@ static int vd55g1_try_fmt_internal(struct v4l2_subdev *sd,
 
 static int vd55g1_apply_cold_start(struct vd55g1_dev *sensor)
 {
+	/*
+	 * Cold start register is a single register expressed as exposure time
+	 * in us. This differ from status registers being a combination of
+	 * exposure, digital gain, and analog gain, requiring the following
+	 * format conversion.
+	 */
+	unsigned int line_time_us = DIV_ROUND_UP(sensor->line_length * MEGA,
+						 sensor->pclk);
+	u8 d_gain = DIV_ROUND_CLOSEST(sensor->cold_start.digital_gain, 1 << 8);
+	u8 a_gain = DIV_ROUND_CLOSEST(32, (32 - sensor->cold_start.analog_gain));
+	unsigned int expo_us = sensor->cold_start.expo * d_gain * a_gain *
+			       line_time_us;
 	int ret = 0;
 
-	vd55g1_write_reg(sensor, VD55G1_REG_AE_COLDSTART_COARSE_EXPOSURE,
-			 sensor->cold_start.expo, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_AE_COLDSTART_ANALOG_GAIN,
-			 sensor->cold_start.analog_gain, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_AE_COLDSTART_DIGITAL_GAIN,
-			 sensor->cold_start.digital_gain, &ret);
+	vd55g1_write_reg(sensor, VD55G1_REG_AE_FORCE_COLDSTART, 1, &ret);
+	vd55g1_write_reg(sensor, VD55G1_REG_AE_COLDSTART_EXP_TIME, expo_us,
+			 &ret);
 
 	return ret;
 }
@@ -869,11 +877,9 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 	if (ret)
 		return ret;
 
-#if 0
 	ret = vd55g1_apply_cold_start(sensor);
 	if (ret)
 		return ret;
-#endif
 
 	vd55g1_write_reg(sensor, VD55G1_REG_ORIENTATION,
 			 sensor->hflip | (sensor->vflip << 1), &ret);
@@ -1007,6 +1013,7 @@ static void vd55g1_save_exposure(struct vd55g1_dev *sensor)
 	ret = vd55g1_read_reg(sensor, VD55G1_REG_APPLIED_ANALOG_GAIN);
 	sensor->cold_start.analog_gain = ret < 0 ? 0 : ret;
 }
+
 
 static int vd55g1_stream_disable(struct vd55g1_dev *sensor)
 {
