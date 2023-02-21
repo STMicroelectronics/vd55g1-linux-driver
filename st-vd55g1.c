@@ -122,7 +122,7 @@
 #define VD55G1_MEDIA_BUS_FMT_DEF			MEDIA_BUS_FMT_Y8_1X8
 #define VD55G1_DARKCAL_PEDESTAL_DEF			0x40
 #define VD55G1_EXPO_MAX_TERM				64
-#define VD55G1_EXPO_DEF					200
+#define VD55G1_EXPO_DEF					500
 #define VD55G0_LINE_LENGTH_SLOW				1200
 #define VD55G0_LINE_LENGTH_FAST				1128
 
@@ -1623,7 +1623,7 @@ static int vd55g1_init_controls(struct vd55g1_dev *sensor)
 	sensor->expo_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 0,
 				  sensor->frame_length - VD55G1_EXPO_MAX_TERM,
-				  1, VD55G1_EXPO_DEF);
+				  1, sensor->manual_expo);
 
 	if (hdl->error) {
 		ret = hdl->error;
@@ -1841,22 +1841,20 @@ static int vd55g1_probe(struct i2c_client *client)
 	if (!sensor)
 		return -ENOMEM;
 
-	sensor->analog_gain = 0;
+	sensor->manual_expo = VD55G1_EXPO_DEF;
+	sensor->analog_gain = 19;
 	sensor->digital_gain = 256;
 
 	sensor->i2c_client = client;
 	sensor->streaming = false;
-	sensor->fmt.code = MEDIA_BUS_FMT_SGBRG8_1X8;
-	sensor->fmt.field = V4L2_FIELD_NONE;
-	sensor->fmt.colorspace = V4L2_COLORSPACE_SRGB;
-	sensor->manual_expo = VD55G1_EXPO_DEF;
 	sensor->vflip = false;
 	sensor->hflip = false;
 	sensor->darkcal_pedestal = VD55G1_DARKCAL_PEDESTAL_DEF;
 	sensor->flash_en = true;
-	sensor->cold_start.expo = 0x32;
-	sensor->cold_start.digital_gain = 256;
-	sensor->cold_start.analog_gain = 0;
+
+	sensor->cold_start.expo = sensor->manual_expo;
+	sensor->cold_start.digital_gain = sensor->digital_gain;
+	sensor->cold_start.analog_gain = sensor->analog_gain;
 
 	sensor->current_mode = &vd55g1_mode_data[VD55G1_DEFAULT_MODE];
 
