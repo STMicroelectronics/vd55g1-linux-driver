@@ -122,8 +122,9 @@
 #define VD55G1_DARKCAL_PEDESTAL_DEF			0x40
 #define VD55G1_EXPO_MAX_TERM				64
 #define VD55G1_EXPO_DEF					500
-#define VD55G0_LINE_LENGTH_SLOW				1200
-#define VD55G0_LINE_LENGTH_FAST				1128
+#define VD55G1_MIN_LINE_LENGTH				1128
+#define VD55G1_MIPI_MARGIN				900
+#define VD55G1_PCLK_DIVISOR				5
 
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
@@ -1171,11 +1172,12 @@ static int vd55g1_configure(struct vd55g1_dev *sensor)
 	/* Frequency to data rate is 1:1 ratio for MIPI */
 	sensor->data_rate_in_mbps = mipi_bps;
 	/* Video timing ISP path (pixel clock)  requires 804/5 mhz = 160 mhz */
-	sensor->pclk = mipi_bps / 5;
+	sensor->pclk = mipi_bps / VD55G1_PCLK_DIVISOR;
 
-	sensor->line_length = VD55G0_LINE_LENGTH_FAST;
-	if (mipi_bps < 900 * HZ_PER_MHZ)
-		sensor->line_length = VD55G0_LINE_LENGTH_SLOW;
+	u32 req_line_length = (sensor->current_mode->crop.width *
+			       get_bpp_by_code(sensor->fmt.code) +
+			       VD55G1_MIPI_MARGIN) / VD55G1_PCLK_DIVISOR;
+	sensor->line_length = max(VD55G1_MIN_LINE_LENGTH, req_line_length);
 	vd55g1_write_reg(sensor, VD55G1_REG_LINE_LENGTH, sensor->line_length, &ret);
 
 	vd55g1_write_reg(sensor, VD55G1_REG_EXT_CLOCK, sensor->clk_freq, &ret);
@@ -1913,13 +1915,13 @@ static int vd55g1_probe(struct i2c_client *client)
 		return ret;
 	}
 
-	//TODO power on should not be necessary
+	vd55g1_fill_framefmt(sensor, sensor->current_mode, &sensor->fmt,
+			     VD55G1_MEDIA_BUS_FMT_DEF);
+
+	/* Check the sensor is the correct one and can be powered on */
 	ret = vd55g1_power_on(dev);
 	if (ret)
 		return ret;
-
-	vd55g1_fill_framefmt(sensor, sensor->current_mode, &sensor->fmt,
-			     VD55G1_MEDIA_BUS_FMT_DEF);
 
 	mutex_init(&sensor->lock);
 
