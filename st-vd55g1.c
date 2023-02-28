@@ -37,6 +37,7 @@
 
 #if KERNEL_VERSION(5, 15, 0) >= LINUX_VERSION_CODE
 #define HZ_PER_MHZ		1000000UL
+#define MEGA			1000000UL
 #else
 #include <linux/units.h>
 #endif
@@ -1167,6 +1168,9 @@ static int vd55g1_configure(struct vd55g1_dev *sensor)
 {
 	/* Double data rate */
 	u32 mipi_bps = link_freq[0] * 2;
+	u32 req_line_length = (sensor->current_mode->crop.width *
+			       get_bpp_by_code(sensor->fmt.code) +
+			       VD55G1_MIPI_MARGIN) / VD55G1_PCLK_DIVISOR;
 	int ret = 0;
 
 	/* Frequency to data rate is 1:1 ratio for MIPI */
@@ -1174,10 +1178,7 @@ static int vd55g1_configure(struct vd55g1_dev *sensor)
 	/* Video timing ISP path (pixel clock)  requires 804/5 mhz = 160 mhz */
 	sensor->pclk = mipi_bps / VD55G1_PCLK_DIVISOR;
 
-	u32 req_line_length = (sensor->current_mode->crop.width *
-			       get_bpp_by_code(sensor->fmt.code) +
-			       VD55G1_MIPI_MARGIN) / VD55G1_PCLK_DIVISOR;
-	sensor->line_length = max(VD55G1_MIN_LINE_LENGTH, req_line_length);
+	sensor->line_length = max((u32)VD55G1_MIN_LINE_LENGTH, req_line_length);
 	vd55g1_write_reg(sensor, VD55G1_REG_LINE_LENGTH, sensor->line_length, &ret);
 
 	vd55g1_write_reg(sensor, VD55G1_REG_EXT_CLOCK, sensor->clk_freq, &ret);
