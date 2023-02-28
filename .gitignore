@@ -1,0 +1,16 @@
+# Driver related
+st-vd55g1.*
+*.cmd
+Module.symvers
+built-in.a
+modules.order
+
+# Debian package build output
+# Ignore
+debian/debhelper-build-stamp
+debian/files
+debian/.debhelper/
+debian/st-vd55g1-dkms*
+debianizer/
+# Allow
+!debian/st-vd55g1-dkms.dkms
