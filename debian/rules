@@ -1,0 +1,23 @@
+#!/usr/bin/make -f
+# See debhelper(7) (uncomment to enable)
+# output every command that modifies files on the build system.
+DH_VERBOSE = 1
+
+include /usr/share/dpkg/pkg-info.mk
+
+%:
+	dh $@ --with dkms
+
+override_dh_install:
+	dh_install Makefile usr/src/st-vd55g1-$(DEB_VERSION_UPSTREAM)/
+	dh_install Kbuild usr/src/st-vd55g1-$(DEB_VERSION_UPSTREAM)/
+	dh_install *.c usr/src/st-vd55g1-$(DEB_VERSION_UPSTREAM)/
+
+override_dh_dkms:
+	dh_dkms -V $(DEB_VERSION_UPSTREAM)
+
+override_dh_auto_configure:
+override_dh_auto_build:
+override_dh_auto_test:
+override_dh_auto_install:
+override_dh_auto_clean:

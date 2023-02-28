@@ -1,0 +1,12 @@
+Source: st-vd55g1-dkms
+Section: kernel
+Priority: optional
+Maintainer: Benjamin Mugnier <benjamin.mugnier@st.com>
+Build-Depends: debhelper (>=10), dkms
+Standards-Version: 4.0.0
+
+Package: st-vd55g1-dkms
+Architecture: all
+Priority: optional
+Depends: ${misc:Depends}
+Description: st-vd55g1 driver in DKMS format.
