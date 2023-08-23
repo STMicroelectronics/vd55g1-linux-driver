@@ -51,9 +51,9 @@ pipeline {
 					}
 					script {
 						if (env.BRANCH_NAME == 'debian') {
-							sh 'debianizer/debianizer.sh'
+							sh 'debianizer/debianizer.sh --zip'
 						} else {
-							sh 'debianizer/debianizer.sh --use-origin --snapshot'
+							sh 'debianizer/debianizer.sh --use-origin --snapshot --zip'
 						}
 					}
 				}
@@ -69,20 +69,36 @@ pipeline {
 					if (env.BRANCH_NAME == 'debian') {
 						rtUpload (
 							serverId: 'artifactory-azure',
-							spec: '''{ "files": [ {
-									"pattern": "st-vd55g1*.deb",
-									"target": "imgswlinux-debian-local/pool/st-vd55g1-dkms/stable/",
-									"props": "deb.distribution=stable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
-								} ] }'''
+							spec: '''{
+								"files": [
+									{
+										"pattern": "st-vd55g1*.deb",
+										"target": "imgswlinux-debian-local/pool/st-vd55g1-dkms/stable/",
+										"props": "deb.distribution=stable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
+									},
+									{
+										"pattern": "st-vd55g1*.zip",
+										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/st-vd55g1/stable/"
+									}
+								]
+							}'''
 						)
 					} else {
 						rtUpload (
 							serverId: 'artifactory-azure',
-							spec: '''{ "files": [ {
-									"pattern": "st-vd55g1*.deb",
-									"target": "imgswlinux-debian-local/pool/st-vd55g1-dkms/unstable/",
-									"props": "deb.distribution=unstable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
-								} ] }'''
+							spec: '''{
+								"files": [
+									{
+										"pattern": "st-vd55g1*.deb",
+										"target": "imgswlinux-debian-local/pool/st-vd55g1-dkms/unstable/",
+										"props": "deb.distribution=unstable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
+									},
+									{
+										"pattern": "st-vd55g1*.zip",
+										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/st-vd55g1/unstable/"
+									}
+								]
+							}'''
 						)
 					}
 				}
