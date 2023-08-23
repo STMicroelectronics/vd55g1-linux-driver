@@ -873,9 +873,9 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_COARSE_EXPOSURE,
 			 sensor->manual_expo, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
-			       sensor->analog_gain, &ret);
+			 sensor->analog_gain, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
-			       sensor->digital_gain, &ret);
+			 sensor->digital_gain, &ret);
 	if (ret)
 		return ret;
 
@@ -893,7 +893,6 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 	ret = vd55g1_apply_patgen(sensor);
 	if (ret)
 		return ret;
-
 
 	return 0;
 }
@@ -1015,7 +1014,6 @@ static void vd55g1_save_exposure(struct vd55g1_dev *sensor)
 	ret = vd55g1_read_reg(sensor, VD55G1_REG_APPLIED_ANALOG_GAIN);
 	sensor->cold_start.analog_gain = ret < 0 ? 0 : ret;
 }
-
 
 static int vd55g1_stream_disable(struct vd55g1_dev *sensor)
 {
