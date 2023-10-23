@@ -445,7 +445,7 @@ static int vd55g1_write_multiple(struct vd55g1_dev *sensor, u32 reg,
 	if (err && *err)
 		return *err;
 
-	if (len > VD55G1_WRITE_MULTIPLE_CHUNK_MAX)
+	if (len > VD55G1_WRITE_MULTIPLE_CHUNK_MAX || len == 0)
 		return -EINVAL;
 	buf[0] = reg >> 8;
 	buf[1] = reg & 0xff;
