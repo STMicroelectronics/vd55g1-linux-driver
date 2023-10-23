@@ -324,7 +324,7 @@ struct vd55g1_dev {
 	u16 frame_length;
 	bool ae_frozen;
 	u32 pattern;
-	u8 darkcal_pedestal;
+	u16 darkcal_pedestal;
 	u16 exposure_target;
 	struct vd55g1_gpios gpios;
 	bool is_slave;
@@ -1552,7 +1552,7 @@ static const struct v4l2_ctrl_config vd55g1_darkcal_pedestal_ctrl = {
 	.name		= "Dark Calibration Pedestal",
 	.type		= V4L2_CTRL_TYPE_INTEGER,
 	.min		= 0,
-	.max		= 255,
+	.max		= 0xffff,
 	.step		= 1,
 	.def		= VD55G1_DARKCAL_PEDESTAL_DEF,
 };
