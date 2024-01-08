@@ -156,10 +156,11 @@ static const char * const vd55g1_supply_name[] = {
 
 static const s64 link_freq[] = {
 	/*
-	 * MIPI output freq is 804Mhz / 2, as it uses both rising edge and
-	 * falling edges to send data
+	 * MIPI output freq is sensor datarate / 2, as it uses both rising edge
+	 * and falling edges to send data.
+	 * Sensor outputs at 1.2Ghz.
 	 */
-	402000000ULL
+	600000000ULL
 };
 
 enum vd55g1_bin_mode {
