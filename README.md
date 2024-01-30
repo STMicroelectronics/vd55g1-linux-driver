@@ -4,25 +4,35 @@
 
 ### Driver
 
-Compile the driver using the Makefile, place it in the kernel modules folder, and resolve modules dependencies.
+Compile the driver using the Makefile
 
 ```
 make
+```
+
+Place it in the kernel modules folder.
+
+```
 sudo cp st-vd55g1.ko /lib/modules/$(uname -r)
+```
+
+Resolve modules dependencies.
+
+```
 sudo depmod -a
 ```
 
 ### Device tree
 
-Compile the device tree overlay matching your platform and plugin board from the `dts` folder.
+ Compile the device tree overlay matching your platform and plugin board from the `dts` folder.
 
 ```
 sudo dtc <device-tree>.dts -o /boot/overlays/<device-tree>.dtbo
 ```
 
-Set the device tree overlay in your platform.
-Here is an example for Raspberry Pi and may differ from platforms to
-platforms. Please refer to your platform documentation.
+Set the device tree overlay in your platform. This may differ from platform to platform. Please refer to your platform documentation.
+
+This is how to set the device tree overlay for Raspberry Pi.
 
 ```
 echo "dtoverlay=<device-tree>" | sudo tee -a /boot/config.txt
