@@ -6,9 +6,7 @@
 	compatible = "brcm,bcm2835";
 
 	fragment@0 {
-
 		target-path="/";
-
 		__overlay__ {
 			camera_clk_12M: camera_clk_12M {
 				#clock-cells = <0>;
@@ -16,21 +14,21 @@
 				clock-frequency = <12000000>;
 			};
 
-			v1v2: v1v2@0 {
+			v1v2: v1v2 {
 				compatible = "regulator-fixed";
 				regulator-name = "fixed-supply-1v2";
 				regulator-min-microvolt = <1200000>;
 				regulator-max-microvolt = <1200000>;
 			};
 
-			v1v8: v1v8@0 {
+			v1v8: v1v8 {
 				compatible = "regulator-fixed";
 				regulator-name = "fixed-supply-1v8";
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
 			};
 
-			v2v8: v2v8@0 {
+			v2v8: v2v8 {
 				compatible = "regulator-fixed";
 				regulator-name = "fixed-supply-2v8";
 				regulator-min-microvolt = <2800000>;
@@ -40,9 +38,7 @@
 	};
 
 	fragment@1 {
-
 		target = <&i2c_csi_dsi>;
-
 		__overlay__ {
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -78,9 +74,7 @@
 	};
 
 	fragment@2 {
-
 		target = <&csi1>;
-
 		__overlay__ {
 			status = "okay";
 
@@ -123,5 +117,4 @@
 			cam0-pwdn      = <&wolfy>,"reset-gpios:4";
 		};
 	};
-
 };
