@@ -24,7 +24,7 @@ sudo depmod -a
 
 ### Device tree
 
- Compile the device tree overlay matching your platform and plugin board from the `dts` folder.
+Compile the device tree overlay matching your platform and plugin board from the `dts` folder.
 
 ```
 sudo dtc <device-tree>.dts -o /boot/overlays/<device-tree>.dtbo
