@@ -157,8 +157,9 @@
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
 #define V4L2_CID_SLAVE				(V4L2_CID_USER_BASE | 0x1022)
-/* Backported components from yet to upstream kernel patches */
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0)
 #define V4L2_CID_HDR_SENSOR_MODE		(V4L2_CID_USER_BASE | 0x1004)
+#endif
 
 #include "st-vd55g1_patch.c"
 
