@@ -2208,7 +2208,11 @@ static struct i2c_driver vd55g1_i2c_driver = {
 		.of_match_table = vd55g1_dt_ids,
 		.pm = &vd55g1_pm_ops,
 	},
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
 	.probe_new = vd55g1_probe,
+#else
+	.probe = vd55g1_probe,
+#endif
 	.remove = vd55g1_remove,
 };
 
