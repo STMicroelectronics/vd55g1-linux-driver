@@ -63,7 +63,7 @@
 					wolfy_ep: endpoint {
 						clock-lanes = <0>;
 						data-lanes = <1>;
-						remote-endpoint = <&csi1_ep>;
+						remote-endpoint = <&csi_ep>;
 						clock-noncontinuous;
 						link-frequencies =
 							/bits/ 64 <201000000 402000000 804000000>;
@@ -79,7 +79,7 @@
 			status = "okay";
 
 			port {
-				csi1_ep: endpoint {
+				csi_ep: endpoint {
 					remote-endpoint = <&wolfy_ep>;
 					clock-lanes = <0>;
 					data-lanes = <1>;
