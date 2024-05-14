@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+/plugin/;
+
+/{
+	compatible = "brcm,bcm2835";
+
+	fragment@0 {
+		target-path="/";
+		__overlay__ {
+			camera_clk_12M: camera_clk_12M {
+				#clock-cells = <0>;
+				compatible = "fixed-clock";
+				clock-frequency = <12000000>;
+			};
+
+			v1v2: v1v2 {
+				compatible = "regulator-fixed";
+				regulator-name = "fixed-supply-1v2";
+				regulator-min-microvolt = <1200000>;
+				regulator-max-microvolt = <1200000>;
+			};
+
+			v1v8: v1v8 {
+				compatible = "regulator-fixed";
+				regulator-name = "fixed-supply-1v8";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+			};
+
+			v2v8: v2v8 {
+				compatible = "regulator-fixed";
+				regulator-name = "fixed-supply-2v8";
+				regulator-min-microvolt = <2800000>;
+				regulator-max-microvolt = <2800000>;
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&i2c_csi_dsi1>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			wolfy: wolfy@10 {
+				status = "ok";
+				compatible = "st,st-vd55g1";
+				reg = <0x10>;
+
+				clocks = <&camera_clk_12M>;
+				clock-names = "xclk";
+
+				VCORE-supply = <&v1v2>;
+				VDDIO-supply = <&v1v8>;
+				VANA-supply = <&v2v8>;
+
+				reset-gpios = <&gpio 5 1>;
+				st,leds = <2>;
+
+				port {
+					wolfy_ep: endpoint {
+						clock-lanes = <0>;
+						data-lanes = <1>;
+						remote-endpoint = <&csi_ep>;
+						clock-noncontinuous;
+						link-frequencies =
+							/bits/ 64 <201000000 402000000 804000000>;
+						lane-polarities = <1 1>;
+					};
+				};
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&csi1>;
+		csi: __overlay__ {
+			status = "okay";
+
+			port {
+				csi_ep: endpoint {
+					remote-endpoint = <&wolfy_ep>;
+					clock-lanes = <0>;
+					data-lanes = <1>;
+					clock-noncontinuous;
+				};
+			};
+		};
+	};
+
+	fragment@3 {
+		target = <&cam1_reg>;
+		__overlay__ {
+			status = "disable";
+		};
+	};
+
+	fragment@4 {
+		target-path="/__overrides__";
+		__overlay__ {
+			cam1-pwdn-ctrl = <&wolfy>,"reset-gpios:0";
+			cam1-pwdn      = <&wolfy>,"reset-gpios:4";
+			media-controller = <&csi1>,"brcm,media-controller?";
+		};
+	};
+};
