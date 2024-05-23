@@ -75,8 +75,9 @@
 
 	fragment@2 {
 		target = <&csi1>;
-		__overlay__ {
+		csi: __overlay__ {
 			status = "okay";
+			brcm,media-controller;
 
 			port {
 				csi_ep: endpoint {
@@ -115,6 +116,7 @@
 		__overlay__ {
 			cam0-pwdn-ctrl = <&wolfy>,"reset-gpios:0";
 			cam0-pwdn      = <&wolfy>,"reset-gpios:4";
+			media-controller = <&csi>,"brcm,media-controller?";
 		};
 	};
 };
