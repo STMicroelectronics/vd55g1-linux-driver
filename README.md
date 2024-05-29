@@ -27,7 +27,7 @@ sudo depmod -a
 Compile the device tree overlay matching your platform and plugin board from the `dts` folder.
 
 ```
-sudo dtc <device-tree>.dts -o /boot/overlays/<device-tree>.dtbo
+sudo dtc <device-tree>.dts -o /boot/firmware/overlays/<device-tree>.dtbo
 ```
 
 Set the device tree overlay in your platform. This may differ from platform to platform. Please refer to your platform documentation.
@@ -35,7 +35,7 @@ Set the device tree overlay in your platform. This may differ from platform to p
 This is how to set the device tree overlay for Raspberry Pi.
 
 ```
-echo "dtoverlay=<device-tree>" | sudo tee -a /boot/config.txt
+echo "dtoverlay=<device-tree>" | sudo tee -a /boot/firmware/config.txt
 ```
 
 Finally, run `sudo reboot` to test your changes.
