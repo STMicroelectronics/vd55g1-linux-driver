@@ -38,7 +38,7 @@
 	};
 
 	fragment@1 {
-		target = <&i2c_csi_dsi>;
+		target = <&i2c_csi_dsi0>;
 		__overlay__ {
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -63,10 +63,11 @@
 					wolfy_ep: endpoint {
 						clock-lanes = <0>;
 						data-lanes = <1>;
-						remote-endpoint = <&csi1_ep>;
+						remote-endpoint = <&csi_ep>;
 						clock-noncontinuous;
 						link-frequencies =
 							/bits/ 64 <201000000 402000000 804000000>;
+						lane-polarities = <1 1>;
 					};
 				};
 			};
@@ -74,13 +75,12 @@
 	};
 
 	fragment@2 {
-		target = <&csi1>;
+		target = <&csi0>;
 		csi: __overlay__ {
 			status = "okay";
-			brcm,media-controller;
 
 			port {
-				csi1_ep: endpoint {
+				csi_ep: endpoint {
 					remote-endpoint = <&wolfy_ep>;
 					clock-lanes = <0>;
 					data-lanes = <1>;
@@ -91,32 +91,18 @@
 	};
 
 	fragment@3 {
-		target = <&i2c0if>;
-		__overlay__ {
-			status = "okay";
-		};
-	};
-
-	fragment@4 {
-		target = <&i2c0mux>;
-		__overlay__ {
-			status = "okay";
-		};
-	};
-
-	fragment@5 {
-		target = <&cam1_reg>;
+		target = <&cam0_reg>;
 		__overlay__ {
 			status = "disable";
 		};
 	};
 
-	fragment@6 {
+	fragment@4 {
 		target-path="/__overrides__";
 		__overlay__ {
 			cam0-pwdn-ctrl = <&wolfy>,"reset-gpios:0";
 			cam0-pwdn      = <&wolfy>,"reset-gpios:4";
-			media-controller = <&csi>,"brcm,media-controller?";
+			media-controller = <&csi0>,"brcm,media-controller?";
 		};
 	};
 };

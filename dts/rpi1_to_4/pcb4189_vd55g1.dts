@@ -67,6 +67,7 @@
 						clock-noncontinuous;
 						link-frequencies =
 							/bits/ 64 <201000000 402000000 804000000>;
+						lane-polarities = <1 1>;
 					};
 				};
 			};
