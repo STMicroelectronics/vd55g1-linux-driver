@@ -111,6 +111,14 @@ pipeline {
 		always {
 			// Remove debian packaging stuff
 			sh 'find . -maxdepth 1 -type f -name "st-vd55g1*" -exec rm -v "{}" \\;'
+
+			// Send mail
+			emailext (
+				subject: '$DEFAULT_SUBJECT',
+				body: '$DEFAULT_CONTENT',
+				recipientProviders: [[$class: 'DevelopersRecipientProvider']],
+				replyTo: '$DEFAULT_REPLYTO'
+			)
 		}
 	}
 }
