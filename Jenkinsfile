@@ -21,7 +21,8 @@ pipeline {
 					checkout scm
 					sh 'sudo -E apt-get update'
 					sh 'sudo -E apt-get --fix-broken install -y'
-					sh 'sudo -E apt-get install linux-headers-generic dkms equivs devscripts -y'
+					sh 'sudo -E apt-get install linux-headers-generic dkms equivs devscripts -y' // debian package
+					sh 'sudo -E apt-get install python3-ply python3-git -y' // checkpatch
 					// Remove old kernels
 					sh 'sudo -E apt-get autoremove -y'
 				}
@@ -34,9 +35,14 @@ pipeline {
 				}
 			}
 		}
-		stage('Test') {
+		stage('Check') {
 			steps {
-				echo 'No tests yet'
+				sh 'git clone https://git.linuxtv.org/media_tree.git --depth 1 -b master || true' // if already cloned
+				dir('media_tree') {
+					sh 'git fetch --depth 1'
+					sh 'git reset --hard origin/master'
+					sh 'find ../pristine/ -name "*[^mod].c" -not -path "*debian*" -print0 | xargs -0 scripts/checkpatch.pl --max-line-length=80 --strict --ignore=LINUX_VERSION_CODE --ignore=UNDOCUMENTED_DT_STRING -f'
+				}
 			}
 		}
 		stage('Package') {
