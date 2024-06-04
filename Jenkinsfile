@@ -19,11 +19,11 @@ pipeline {
 				 */
 				dir('pristine') {
 					checkout scm
-					sh 'sudo -E apt update'
-					sh 'sudo -E apt --fix-broken install -y'
-					sh 'sudo -E apt install linux-headers-generic dkms equivs devscripts -y'
+					sh 'sudo -E apt-get update'
+					sh 'sudo -E apt-get --fix-broken install -y'
+					sh 'sudo -E apt-get install linux-headers-generic dkms equivs devscripts -y'
 					// Remove old kernels
-					sh 'sudo -E apt autoremove -y'
+					sh 'sudo -E apt-get autoremove -y'
 				}
 			}
 		}
