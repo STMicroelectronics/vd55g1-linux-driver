@@ -13,7 +13,7 @@ make
 Place it in the kernel modules folder.
 
 ```
-sudo cp st-vd55g1.ko /lib/modules/$(uname -r)
+sudo cp vd55g1.ko /lib/modules/$(uname -r)
 ```
 
 Resolve modules dependencies.

@@ -161,7 +161,7 @@
 #define V4L2_CID_HDR_SENSOR_MODE		(V4L2_CID_USER_BASE | 0x1004)
 #endif
 
-#include "st-vd55g1_patch.c"
+#include "vd55g1_patch.c"
 
 static const char * const vd55g1_test_pattern_menu[] = {
 	"Disabled",
@@ -2204,7 +2204,7 @@ static void vd55g1_remove(struct i2c_client *client)
 }
 
 static const struct of_device_id vd55g1_dt_ids[] = {
-	{ .compatible = "st,st-vd55g1" },
+	{ .compatible = "st,vd55g1" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, vd55g1_dt_ids);
@@ -2215,7 +2215,7 @@ static const struct dev_pm_ops vd55g1_pm_ops = {
 
 static struct i2c_driver vd55g1_i2c_driver = {
 	.driver = {
-		.name  = "st-vd55g1",
+		.name  = "vd55g1",
 		.of_match_table = vd55g1_dt_ids,
 		.pm = &vd55g1_pm_ops,
 	},

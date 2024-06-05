@@ -1,5 +1,5 @@
 # Driver related
-st-vd55g1.*
+vd55g1.*
 *.cmd
 Module.symvers
 built-in.a
@@ -10,7 +10,7 @@ modules.order
 debian/debhelper-build-stamp
 debian/files
 debian/.debhelper/
-debian/st-vd55g1-dkms*
+debian/vd55g1-dkms*
 debianizer/
 # Allow
-!debian/st-vd55g1-dkms.dkms
+!debian/vd55g1-dkms.dkms

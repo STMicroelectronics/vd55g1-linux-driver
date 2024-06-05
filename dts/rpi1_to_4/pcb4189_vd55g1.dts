@@ -46,7 +46,7 @@
 
 			wolfy: wolfy@10 {
 				status = "ok";
-				compatible = "st,st-vd55g1";
+				compatible = "st,vd55g1";
 				reg = <0x10>;
 
 				clocks = <&camera_clk_12M>;
