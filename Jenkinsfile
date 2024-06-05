@@ -19,11 +19,12 @@ pipeline {
 				 */
 				dir('pristine') {
 					checkout scm
-					sh 'sudo -E apt update'
-					sh 'sudo -E apt --fix-broken install -y'
-					sh 'sudo -E apt install linux-headers-generic dkms equivs devscripts -y'
+					sh 'sudo -E apt-get update'
+					sh 'sudo -E apt-get --fix-broken install -y'
+					sh 'sudo -E apt-get install linux-headers-generic dkms equivs devscripts -y' // debian package
+					sh 'sudo -E apt-get install python3-ply python3-git -y' // checkpatch
 					// Remove old kernels
-					sh 'sudo -E apt autoremove -y'
+					sh 'sudo -E apt-get autoremove -y'
 				}
 			}
 		}
@@ -34,9 +35,14 @@ pipeline {
 				}
 			}
 		}
-		stage('Test') {
+		stage('Check') {
 			steps {
-				echo 'No tests yet'
+				sh 'git clone https://git.linuxtv.org/media_tree.git --depth 1 -b master || true' // if already cloned
+				dir('media_tree') {
+					sh 'git fetch --depth 1'
+					sh 'git reset --hard origin/master'
+					sh 'find ../pristine/ -name "*[^mod].c" -not -path "*debian*" -print0 | xargs -0 scripts/checkpatch.pl --max-line-length=80 --strict --ignore=LINUX_VERSION_CODE --ignore=UNDOCUMENTED_DT_STRING -f'
+				}
 			}
 		}
 		stage('Package') {
@@ -73,13 +79,13 @@ pipeline {
 							spec: '''{
 								"files": [
 									{
-										"pattern": "st-vd55g1*.deb",
-										"target": "imgswlinux-debian-local/pool/st-vd55g1-dkms/stable/",
+										"pattern": "vd55g1*.deb",
+										"target": "imgswlinux-debian-local/pool/vd55g1-dkms/stable/",
 										"props": "deb.distribution=stable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
 									},
 									{
-										"pattern": "st-vd55g1*.zip",
-										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/st-vd55g1/stable/"
+										"pattern": "vd55g1*.zip",
+										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/vd55g1/stable/"
 									}
 								]
 							}'''
@@ -90,13 +96,13 @@ pipeline {
 							spec: '''{
 								"files": [
 									{
-										"pattern": "st-vd55g1*.deb",
-										"target": "imgswlinux-debian-local/pool/st-vd55g1-dkms/unstable/",
+										"pattern": "vd55g1*.deb",
+										"target": "imgswlinux-debian-local/pool/vd55g1-dkms/unstable/",
 										"props": "deb.distribution=unstable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
 									},
 									{
-										"pattern": "st-vd55g1*.zip",
-										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/st-vd55g1/unstable/"
+										"pattern": "vd55g1*.zip",
+										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/vd55g1/unstable/"
 									}
 								]
 							}'''
@@ -110,7 +116,15 @@ pipeline {
 	post {
 		always {
 			// Remove debian packaging stuff
-			sh 'find . -maxdepth 1 -type f -name "st-vd55g1*" -exec rm -v "{}" \\;'
+			sh 'find . -maxdepth 1 -type f -name "vd55g1*" -exec rm -v "{}" \\;'
+
+			// Send mail
+			emailext (
+				subject: '$DEFAULT_SUBJECT',
+				body: '$DEFAULT_CONTENT',
+				recipientProviders: [[$class: 'DevelopersRecipientProvider']],
+				replyTo: '$DEFAULT_REPLYTO'
+			)
 		}
 	}
 }

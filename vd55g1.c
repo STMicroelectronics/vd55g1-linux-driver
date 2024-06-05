@@ -25,7 +25,7 @@
 #include <media/v4l2-subdev.h>
 
 /* Backward compatibility */
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
+#if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
 #define MIPI_CSI2_DT_RAW8	0x2a
 #define MIPI_CSI2_DT_RAW10	0x2b
 #define MIPI_CSI2_DT_RAW12	0x2c
@@ -35,7 +35,7 @@
 #include <media/mipi-csi2.h>
 #endif
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0)
+#if KERNEL_VERSION(5, 15, 0) > LINUX_VERSION_CODE
 #define HZ_PER_MHZ		1000000UL
 #define MEGA			1000000UL
 #else
@@ -157,11 +157,11 @@
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
 #define V4L2_CID_SLAVE				(V4L2_CID_USER_BASE | 0x1022)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 2, 0)
+#if KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE
 #define V4L2_CID_HDR_SENSOR_MODE		(V4L2_CID_USER_BASE | 0x1004)
 #endif
 
-#include "st-vd55g1_patch.c"
+#include "vd55g1_patch.c"
 
 static const char * const vd55g1_test_pattern_menu[] = {
 	"Disabled",
@@ -534,7 +534,7 @@ static int vd55g1_poll_reg(struct vd55g1_dev *sensor, u32 reg, u8 poll_val,
 {
 	const unsigned int loop_delay_ms = 10;
 	int ret;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 7, 0)
+#if KERNEL_VERSION(5, 7, 0) > LINUX_VERSION_CODE
 	int loop_nb = timeout_ms / loop_delay_ms;
 
 	while (--loop_nb) {
@@ -570,7 +570,7 @@ static int vd55g1_update_gpio_mode(struct vd55g1_dev *sensor, u32 mode,
 	if (sensor->hdr == VD55G1_HDR_SUB && mode == VD55G1_GPIO_MODE_STROBE) {
 		/* Make its context 1 counterpart strobe too */
 		ret = vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(0) + gpio,
-				index2val[mode], NULL);
+				       index2val[mode], NULL);
 		if (ret)
 			return ret;
 	}
@@ -916,7 +916,8 @@ static int vd55g1_apply_cold_start(struct vd55g1_dev *sensor)
 	unsigned int line_time_us = DIV_ROUND_UP(sensor->line_length * MEGA,
 						 sensor->pclk);
 	u8 d_gain = DIV_ROUND_CLOSEST(sensor->cold_start.digital_gain, 1 << 8);
-	u8 a_gain = DIV_ROUND_CLOSEST(32, (32 - sensor->cold_start.analog_gain));
+	u8 a_gain = DIV_ROUND_CLOSEST(32,
+				      (32 - sensor->cold_start.analog_gain));
 	unsigned int expo_us = sensor->cold_start.expo * d_gain * a_gain *
 			       line_time_us;
 	int ret = 0;
@@ -937,24 +938,35 @@ static int vd55g1_apply_hdr_mode(struct vd55g1_dev *sensor)
 		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_USE_CASES, 0,
 				 &ret);
 		vd55g1_write_reg(sensor, VD55G1_REG_NEXT_CTX, 0x0, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_CTX_REPEAT_COUNT(0), 1, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_VT_MODE(0), VD55G1_VT_MODE_NORMAL, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_MASK_FRAME_CTRL(0), VD55G1_MASK_FRAME_CTRL_OUTPUT, &ret);
+		vd55g1_write_reg(sensor, VD55G1_REG_CTX_REPEAT_COUNT(0), 1,
+				 &ret);
+		vd55g1_write_reg(sensor, VD55G1_REG_VT_MODE(0),
+				 VD55G1_VT_MODE_NORMAL, &ret);
+		vd55g1_write_reg(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
+				 VD55G1_MASK_FRAME_CTRL_OUTPUT, &ret);
 		break;
 	case VD55G1_HDR_SUB:
 		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_USE_CASES,
 				 VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT, &ret);
 		vd55g1_write_reg(sensor, VD55G1_REG_NEXT_CTX, 0x1, &ret);
 
-		vd55g1_write_reg(sensor, VD55G1_REG_CTX_REPEAT_COUNT(0), 1, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_VT_MODE(0), VD55G1_VT_MODE_NORMAL, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_MASK_FRAME_CTRL(0), VD55G1_MASK_FRAME_CTRL_MASK, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_INSTANCE(0), 0, &ret);
+		vd55g1_write_reg(sensor, VD55G1_REG_CTX_REPEAT_COUNT(0), 1,
+				 &ret);
+		vd55g1_write_reg(sensor, VD55G1_REG_VT_MODE(0),
+				 VD55G1_VT_MODE_NORMAL, &ret);
+		vd55g1_write_reg(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
+				 VD55G1_MASK_FRAME_CTRL_MASK, &ret);
+		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_INSTANCE(0), 0,
+				 &ret);
 
-		vd55g1_write_reg(sensor, VD55G1_REG_CTX_REPEAT_COUNT(1), 1, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_VT_MODE(1), VD55G1_VT_MODE_SUBTRACTION, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_MASK_FRAME_CTRL(1), VD55G1_MASK_FRAME_CTRL_OUTPUT, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_INSTANCE(1), 1, &ret);
+		vd55g1_write_reg(sensor, VD55G1_REG_CTX_REPEAT_COUNT(1), 1,
+				 &ret);
+		vd55g1_write_reg(sensor, VD55G1_REG_VT_MODE(1),
+				 VD55G1_VT_MODE_SUBTRACTION, &ret);
+		vd55g1_write_reg(sensor, VD55G1_REG_MASK_FRAME_CTRL(1),
+				 VD55G1_MASK_FRAME_CTRL_OUTPUT, &ret);
+		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_INSTANCE(1), 1,
+				 &ret);
 		break;
 	default:
 		/* Should never happen */
@@ -1172,7 +1184,7 @@ static int vd55g1_tx_from_ep(struct vd55g1_dev *sensor,
 	int p, l;
 	int i;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 20, 0)
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
 	ep = v4l2_fwnode_endpoint_alloc_parse(handle);
 #else
 	struct v4l2_fwnode_endpoint ep_node = { .bus_type =
@@ -1299,7 +1311,8 @@ static int vd55g1_configure(struct vd55g1_dev *sensor)
 		min_line_length = VD55G1_MIN_LINE_LENGTH_SUB;
 	sensor->line_length = max(min_line_length, req_line_length);
 
-	vd55g1_write_reg(sensor, VD55G1_REG_LINE_LENGTH, sensor->line_length, &ret);
+	vd55g1_write_reg(sensor, VD55G1_REG_LINE_LENGTH, sensor->line_length,
+			 &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_EXT_CLOCK, sensor->clk_freq, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
 	vd55g1_write_reg(sensor, VD55G1_REG_MIPI_DATA_RATE, mipi_bps, &ret);
@@ -1356,13 +1369,15 @@ static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
 	return ret;
 }
 
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd55g1_get_selection(struct v4l2_subdev *sd,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 				struct v4l2_subdev_pad_config *cfg,
-#else
-				struct v4l2_subdev_state *sd_state,
-#endif
 				struct v4l2_subdev_selection *sel)
+#else
+static int vd55g1_get_selection(struct v4l2_subdev *sd,
+				struct v4l2_subdev_state *sd_state,
+				struct v4l2_subdev_selection *sel)
+#endif
 {
 	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
 
@@ -1383,13 +1398,15 @@ static int vd55g1_get_selection(struct v4l2_subdev *sd,
 	return -EINVAL;
 }
 
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd55g1_enum_mbus_code(struct v4l2_subdev *sd,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 				 struct v4l2_subdev_pad_config *cfg,
-#else
-				 struct v4l2_subdev_state *sd_state,
-#endif
 				 struct v4l2_subdev_mbus_code_enum *code)
+#else
+static int vd55g1_enum_mbus_code(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *sd_state,
+				 struct v4l2_subdev_mbus_code_enum *code)
+#endif
 {
 	if (code->index >= ARRAY_SIZE(vd55g1_supported_codes))
 		return -EINVAL;
@@ -1399,13 +1416,15 @@ static int vd55g1_enum_mbus_code(struct v4l2_subdev *sd,
 	return 0;
 }
 
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd55g1_get_fmt(struct v4l2_subdev *sd,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 			  struct v4l2_subdev_pad_config *cfg,
-#else
-			  struct v4l2_subdev_state *sd_state,
-#endif
 			  struct v4l2_subdev_format *format)
+#else
+static int vd55g1_get_fmt(struct v4l2_subdev *sd,
+			  struct v4l2_subdev_state *sd_state,
+			  struct v4l2_subdev_format *format)
+#endif
 {
 	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
 	struct v4l2_mbus_framefmt *fmt;
@@ -1413,7 +1432,7 @@ static int vd55g1_get_fmt(struct v4l2_subdev *sd,
 	mutex_lock(&sensor->lock);
 
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 		fmt = v4l2_subdev_get_try_format(&sensor->sd, cfg,
 						 format->pad);
 #else
@@ -1430,13 +1449,15 @@ static int vd55g1_get_fmt(struct v4l2_subdev *sd,
 	return 0;
 }
 
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd55g1_set_fmt(struct v4l2_subdev *sd,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 			  struct v4l2_subdev_pad_config *cfg,
-#else
-			  struct v4l2_subdev_state *sd_state,
-#endif
 			  struct v4l2_subdev_format *format)
+#else
+static int vd55g1_set_fmt(struct v4l2_subdev *sd,
+			  struct v4l2_subdev_state *sd_state,
+			  struct v4l2_subdev_format *format)
+#endif
 {
 	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
 	const struct vd55g1_mode_info *new_mode;
@@ -1456,7 +1477,7 @@ static int vd55g1_set_fmt(struct v4l2_subdev *sd,
 		goto out;
 
 	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 		fmt = v4l2_subdev_get_try_format(sd, cfg, 0);
 #else
 		fmt = v4l2_subdev_get_try_format(sd, sd_state, 0);
@@ -1495,13 +1516,13 @@ out:
 	return ret;
 }
 
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd55g1_init_cfg(struct v4l2_subdev *sd,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
-			   struct v4l2_subdev_pad_config *cfg
+			   struct v4l2_subdev_pad_config *cfg)
 #else
-			   struct v4l2_subdev_state *sd_state
+static int vd55g1_init_cfg(struct v4l2_subdev *sd,
+			   struct v4l2_subdev_state *sd_state)
 #endif
-			   )
 {
 	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
 	struct v4l2_subdev_format fmt = { 0 };
@@ -1509,20 +1530,22 @@ static int vd55g1_init_cfg(struct v4l2_subdev *sd,
 	vd55g1_fill_framefmt(sensor, sensor->current_mode, &fmt.format,
 			     VD55G1_MEDIA_BUS_FMT_DEF);
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 	return vd55g1_set_fmt(sd, cfg, &fmt);
 #else
 	return vd55g1_set_fmt(sd, sd_state, &fmt);
 #endif
 }
 
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
 static int vd55g1_enum_frame_size(struct v4l2_subdev *sd,
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 14, 0)
 				  struct v4l2_subdev_pad_config *cfg,
-#else
-				  struct v4l2_subdev_state *sd_state,
-#endif
 				  struct v4l2_subdev_frame_size_enum *fse)
+#else
+static int vd55g1_enum_frame_size(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *sd_state,
+				  struct v4l2_subdev_frame_size_enum *fse)
+#endif
 {
 	if (fse->index >= ARRAY_SIZE(vd55g1_mode_data))
 		return -EINVAL;
@@ -1726,6 +1749,9 @@ static int vd55g1_init_controls(struct vd55g1_dev *sensor)
 	unsigned int hblank = sensor->line_length - sensor->current_mode->width;
 	unsigned int expo_mode = sensor->expo_state == VD55G1_EXP_AUTO ?
 		V4L2_EXPOSURE_AUTO :  V4L2_EXPOSURE_MANUAL;
+	unsigned int vblank_default = sensor->vblank_min * 2 +
+		sensor->current_mode->crop.height;
+	unsigned int vblank_max = 0xffff - cur_mode->crop.height * 2;
 	int ret;
 
 	v4l2_ctrl_handler_init(hdl, 16);
@@ -1763,8 +1789,7 @@ static int vd55g1_init_controls(struct vd55g1_dev *sensor)
 	if (sensor->pixel_rate_ctrl)
 		sensor->pixel_rate_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
-						sensor->vblank_min * 2 + sensor->current_mode->crop.height,
-						0xffff - cur_mode->crop.height * 2,
+						vblank_default, vblank_max,
 						1, sensor->vblank);
 	hblank = sensor->line_length - sensor->current_mode->width;
 	sensor->hblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
@@ -2156,7 +2181,7 @@ error_power_off:
 	return ret;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
 static int vd55g1_remove(struct i2c_client *client)
 #else
 static void vd55g1_remove(struct i2c_client *client)
@@ -2173,13 +2198,13 @@ static void vd55g1_remove(struct i2c_client *client)
 	if (!pm_runtime_status_suspended(&client->dev))
 		vd55g1_power_off(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
 	return 0;
 #endif
 }
 
 static const struct of_device_id vd55g1_dt_ids[] = {
-	{ .compatible = "st,st-vd55g1" },
+	{ .compatible = "st,vd55g1" },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, vd55g1_dt_ids);
@@ -2190,11 +2215,11 @@ static const struct dev_pm_ops vd55g1_pm_ops = {
 
 static struct i2c_driver vd55g1_i2c_driver = {
 	.driver = {
-		.name  = "st-vd55g1",
+		.name  = "vd55g1",
 		.of_match_table = vd55g1_dt_ids,
 		.pm = &vd55g1_pm_ops,
 	},
-#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
+#if KERNEL_VERSION(6, 3, 0) > LINUX_VERSION_CODE
 	.probe_new = vd55g1_probe,
 #else
 	.probe = vd55g1_probe,
