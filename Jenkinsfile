@@ -88,7 +88,8 @@ pipeline {
 										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/vd55g1/stable/"
 									}
 								]
-							}'''
+							}''',
+							failNoOp: true
 						)
 					} else {
 						rtUpload (
@@ -105,7 +106,8 @@ pipeline {
 										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/vd55g1/unstable/"
 									}
 								]
-							}'''
+							}''',
+							failNoOp: true
 						)
 					}
 				}
