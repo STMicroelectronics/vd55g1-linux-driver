@@ -1,3 +1,11 @@
+vd55g1-dkms (1.0.2-1) unstable; urgency=medium
+
+  * New upstream release
+  * Update debian/rules to reflect new driver name
+  * Update package name
+
+ -- Sylvain Petinot <sylvain.petinot@st.com>  Wed, 05 Jun 2024 15:14:18 +0200
+
 st-vd55g1-dkms (1.0.1-1) unstable; urgency=medium
 
   * New upstream release
