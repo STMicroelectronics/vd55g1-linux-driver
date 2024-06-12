@@ -335,7 +335,7 @@ struct vd55g1_gpios {
 	u32 in_sync;
 };
 
-struct vd55g1_dev {
+struct vd55g1 {
 	struct i2c_client *i2c_client;
 	struct v4l2_subdev sd;
 	struct media_pad pad;
@@ -388,14 +388,14 @@ struct vd55g1_dev {
 	} cold_start;
 };
 
-static inline struct vd55g1_dev *to_vd55g1_dev(struct v4l2_subdev *sd)
+static inline struct vd55g1 *to_vd55g1(struct v4l2_subdev *sd)
 {
-	return container_of(sd, struct vd55g1_dev, sd);
+	return container_of(sd, struct vd55g1, sd);
 }
 
 static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
 {
-	return &container_of(ctrl->handler, struct vd55g1_dev,
+	return &container_of(ctrl->handler, struct vd55g1,
 		ctrl_handler)->sd;
 }
 
@@ -426,14 +426,14 @@ static u8 get_data_type_by_code(__u32 code)
 	return MIPI_CSI2_DT_RAW8;
 }
 
-static s32 get_pixel_rate(struct vd55g1_dev *sensor)
+static s32 get_pixel_rate(struct vd55g1 *sensor)
 {
 	return div64_u64((u64)sensor->data_rate_in_mbps * sensor->nb_of_lane,
 			 get_bpp_by_code(sensor->fmt.code));
 }
 
 #if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
-static int vd55g1_read(struct vd55g1_dev *sensor, u32 reg, u32 *val, int *err)
+static int vd55g1_read(struct vd55g1 *sensor, u32 reg, u32 *val, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	unsigned int len = (reg >> CCI_REG_WIDTH_SHIFT) & 7;
@@ -477,7 +477,7 @@ out:
 	return ret;
 }
 
-static int vd55g1_write(struct vd55g1_dev *sensor, u32 reg, u32 val, int *err)
+static int vd55g1_write(struct vd55g1 *sensor, u32 reg, u32 val, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	unsigned int len = (reg >> CCI_REG_WIDTH_SHIFT) & 7;
@@ -525,7 +525,7 @@ out:
 	cci_write((sensor)->regmap, reg, (u64)val, err)
 #endif
 
-static int vd55g1_write_array(struct vd55g1_dev *sensor, u32 reg, unsigned int len,
+static int vd55g1_write_array(struct vd55g1 *sensor, u32 reg, unsigned int len,
 			      const u8 *array, int *err)
 {
 	unsigned int chunk_sz = 1024;
@@ -556,7 +556,7 @@ out:
 	return ret;
 }
 
-static int vd55g1_poll_reg(struct vd55g1_dev *sensor, u32 reg, u8 poll_val,
+static int vd55g1_poll_reg(struct vd55g1 *sensor, u32 reg, u8 poll_val,
 			   int *err)
 {
 	unsigned int val = 0;
@@ -575,12 +575,12 @@ static int vd55g1_poll_reg(struct vd55g1_dev *sensor, u32 reg, u8 poll_val,
 	return ret;
 }
 
-static int vd55g1_wait_state(struct vd55g1_dev *sensor, int state, int *err)
+static int vd55g1_wait_state(struct vd55g1 *sensor, int state, int *err)
 {
 	return vd55g1_poll_reg(sensor, VD55G1_REG_SYSTEM_FSM, state, err);
 }
 
-static int vd55g1_update_gpio_mode(struct vd55g1_dev *sensor, u32 mode,
+static int vd55g1_update_gpio_mode(struct vd55g1 *sensor, u32 mode,
 				   int gpio)
 {
 	u8 index2val[] = {0x01, 0x02, 0x06, 0x0a};
@@ -598,7 +598,7 @@ static int vd55g1_update_gpio_mode(struct vd55g1_dev *sensor, u32 mode,
 				index2val[mode], NULL);
 }
 
-static int vd55g1_set_gpios_array(struct vd55g1_dev *sensor, u32 *array,
+static int vd55g1_set_gpios_array(struct vd55g1 *sensor, u32 *array,
 				  int size, enum vd55g1_gpio_modes mode)
 {
 	unsigned int i;
@@ -615,7 +615,7 @@ static int vd55g1_set_gpios_array(struct vd55g1_dev *sensor, u32 *array,
 	return 0;
 }
 
-static int vd55g1_apply_exposure_auto(struct vd55g1_dev *sensor)
+static int vd55g1_apply_exposure_auto(struct vd55g1 *sensor)
 {
 	enum vd55g1_expo_state exp = sensor->expo_state;
 	int ret;
@@ -633,7 +633,7 @@ static int vd55g1_apply_exposure_auto(struct vd55g1_dev *sensor)
 	return vd55g1_write(sensor, VD55G1_REG_EXP_MODE(0), exp, NULL);
 }
 
-static int vd55g1_get_regulators(struct vd55g1_dev *sensor)
+static int vd55g1_get_regulators(struct vd55g1 *sensor)
 {
 	int i;
 
@@ -645,7 +645,7 @@ static int vd55g1_get_regulators(struct vd55g1_dev *sensor)
 				       sensor->supplies);
 }
 
-static int vd55g1_apply_patgen(struct vd55g1_dev *sensor)
+static int vd55g1_apply_patgen(struct vd55g1 *sensor)
 {
 	static const u8 index2val[] = {
 		0x0, 0x22, 0x28
@@ -675,7 +675,7 @@ static int vd55g1_apply_patgen(struct vd55g1_dev *sensor)
 	return vd55g1_write(sensor, VD55G1_REG_PATGEN_CTRL, reg, NULL);
 }
 
-static int vd55g1_apply_flash(struct vd55g1_dev *sensor)
+static int vd55g1_apply_flash(struct vd55g1 *sensor)
 {
 	struct vd55g1_gpios *gpios = &sensor->gpios;
 
@@ -687,7 +687,7 @@ static int vd55g1_apply_flash(struct vd55g1_dev *sensor)
 				      ARRAY_SIZE(gpios->leds), mode);
 }
 
-static int vd55g1_apply_darkcal_pedestal(struct vd55g1_dev *sensor)
+static int vd55g1_apply_darkcal_pedestal(struct vd55g1 *sensor)
 {
 	int ret = 0;
 
@@ -699,7 +699,7 @@ static int vd55g1_apply_darkcal_pedestal(struct vd55g1_dev *sensor)
 	return ret;
 }
 
-static int vd55g1_update_exposure_auto(struct vd55g1_dev *sensor, u32 index)
+static int vd55g1_update_exposure_auto(struct vd55g1 *sensor, u32 index)
 {
 	int ret;
 
@@ -720,7 +720,7 @@ static int vd55g1_update_exposure_auto(struct vd55g1_dev *sensor, u32 index)
 	return 0;
 }
 
-static int vd55g1_lock_exposure(struct vd55g1_dev *sensor,
+static int vd55g1_lock_exposure(struct vd55g1 *sensor,
 				struct v4l2_ctrl *ctrl)
 {
 	/* Only exposure lock is supported */
@@ -738,7 +738,7 @@ static int vd55g1_lock_exposure(struct vd55g1_dev *sensor,
 	return 0;
 }
 
-static int vd55g1_get_temp_stream_enable(struct vd55g1_dev *sensor, int *temp)
+static int vd55g1_get_temp_stream_enable(struct vd55g1 *sensor, int *temp)
 {
 	u32 temperature;
 	int ret;
@@ -754,7 +754,7 @@ static int vd55g1_get_temp_stream_enable(struct vd55g1_dev *sensor, int *temp)
 	return 0;
 }
 
-static int vd55g1_apply_framelength(struct vd55g1_dev *sensor)
+static int vd55g1_apply_framelength(struct vd55g1 *sensor)
 {
 	int ret = 0;
 
@@ -769,7 +769,7 @@ static int vd55g1_apply_framelength(struct vd55g1_dev *sensor)
 				sensor->frame_length, NULL);
 }
 
-static int vd55g1_update_vblank(struct vd55g1_dev *sensor, u16 vblank)
+static int vd55g1_update_vblank(struct vd55g1 *sensor, u16 vblank)
 {
 	sensor->frame_length = sensor->current_mode->crop.height +
 			       sensor->vblank;
@@ -779,7 +779,7 @@ static int vd55g1_update_vblank(struct vd55g1_dev *sensor, u16 vblank)
 	return 0;
 }
 
-static int vd55g1_get_temp_stream_disable(struct vd55g1_dev *sensor, int *temp)
+static int vd55g1_get_temp_stream_disable(struct vd55g1 *sensor, int *temp)
 {
 	int ret;
 
@@ -795,7 +795,7 @@ static int vd55g1_get_temp_stream_disable(struct vd55g1_dev *sensor, int *temp)
 	return vd55g1_get_temp_stream_enable(sensor, temp);
 }
 
-static int vd55g1_get_temp(struct vd55g1_dev *sensor, int *temp)
+static int vd55g1_get_temp(struct vd55g1 *sensor, int *temp)
 {
 	*temp = 0;
 	if (sensor->streaming)
@@ -804,7 +804,7 @@ static int vd55g1_get_temp(struct vd55g1_dev *sensor, int *temp)
 		return vd55g1_get_temp_stream_disable(sensor, temp);
 }
 
-static int vd55g1_update_analog_gain(struct vd55g1_dev *sensor, u32 target)
+static int vd55g1_update_analog_gain(struct vd55g1 *sensor, u32 target)
 {
 	sensor->analog_gain = target;
 
@@ -814,7 +814,7 @@ static int vd55g1_update_analog_gain(struct vd55g1_dev *sensor, u32 target)
 	return 0;
 }
 
-static int vd55g1_update_digital_gain(struct vd55g1_dev *sensor, u32 target)
+static int vd55g1_update_digital_gain(struct vd55g1 *sensor, u32 target)
 {
 	sensor->digital_gain = target;
 
@@ -824,7 +824,7 @@ static int vd55g1_update_digital_gain(struct vd55g1_dev *sensor, u32 target)
 	return 0;
 }
 
-static int vd55g1_update_exposure(struct vd55g1_dev *sensor, int expo_ms)
+static int vd55g1_update_exposure(struct vd55g1 *sensor, int expo_ms)
 {
 	sensor->manual_expo = expo_ms;
 	if (sensor->streaming)
@@ -835,7 +835,7 @@ static int vd55g1_update_exposure(struct vd55g1_dev *sensor, int expo_ms)
 	return 0;
 }
 
-static int vd55g1_update_darkcal_pedestal(struct vd55g1_dev *sensor,
+static int vd55g1_update_darkcal_pedestal(struct vd55g1 *sensor,
 					  int pedestal)
 {
 	sensor->darkcal_pedestal = pedestal;
@@ -845,7 +845,7 @@ static int vd55g1_update_darkcal_pedestal(struct vd55g1_dev *sensor,
 	return 0;
 }
 
-static int vd55g1_update_exposure_target(struct vd55g1_dev *sensor, int index)
+static int vd55g1_update_exposure_target(struct vd55g1 *sensor, int index)
 {
 	/*
 	 * Find auto exposure target with: default target exposure * 2^EV
@@ -863,7 +863,7 @@ static int vd55g1_update_exposure_target(struct vd55g1_dev *sensor, int index)
 	return 0;
 }
 
-static int vd55g1_update_flash(struct vd55g1_dev *sensor, int flash_en)
+static int vd55g1_update_flash(struct vd55g1 *sensor, int flash_en)
 {
 	sensor->flash_en = flash_en;
 	if (sensor->streaming)
@@ -872,7 +872,7 @@ static int vd55g1_update_flash(struct vd55g1_dev *sensor, int flash_en)
 	return 0;
 }
 
-static int vd55g1_apply_reset(struct vd55g1_dev *sensor)
+static int vd55g1_apply_reset(struct vd55g1 *sensor)
 {
 	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
 	usleep_range(5000, 10000);
@@ -883,7 +883,7 @@ static int vd55g1_apply_reset(struct vd55g1_dev *sensor)
 	return vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_READY_TO_BOOT, NULL);
 }
 
-static void vd55g1_fill_framefmt(struct vd55g1_dev *sensor,
+static void vd55g1_fill_framefmt(struct vd55g1 *sensor,
 				 const struct vd55g1_mode_info *mode,
 				 struct v4l2_mbus_framefmt *fmt, u32 code)
 {
@@ -901,7 +901,7 @@ static int vd55g1_try_fmt_internal(struct v4l2_subdev *sd,
 				   struct v4l2_mbus_framefmt *fmt,
 				   const struct vd55g1_mode_info **new_mode)
 {
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	const struct vd55g1_mode_info *mode = vd55g1_mode_data;
 	unsigned int index;
 
@@ -924,7 +924,7 @@ static int vd55g1_try_fmt_internal(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int vd55g1_apply_cold_start(struct vd55g1_dev *sensor)
+static int vd55g1_apply_cold_start(struct vd55g1 *sensor)
 {
 	/*
 	 * Cold start register is a single register expressed as exposure time
@@ -948,7 +948,7 @@ static int vd55g1_apply_cold_start(struct vd55g1_dev *sensor)
 	return ret;
 }
 
-static int vd55g1_apply_hdr_mode(struct vd55g1_dev *sensor)
+static int vd55g1_apply_hdr_mode(struct vd55g1 *sensor)
 {
 	int ret = 0;
 
@@ -996,7 +996,7 @@ static int vd55g1_apply_hdr_mode(struct vd55g1_dev *sensor)
 	return ret;
 }
 
-static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
+static int vd55g1_apply_settings(struct vd55g1 *sensor)
 {
 	int ret;
 
@@ -1039,7 +1039,7 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 	return 0;
 }
 
-static int vd55g1_apply_frame_format(struct vd55g1_dev *sensor)
+static int vd55g1_apply_frame_format(struct vd55g1 *sensor)
 {
 	const struct v4l2_rect *crop = &sensor->current_mode->crop;
 	int ret = 0;
@@ -1060,7 +1060,7 @@ static int vd55g1_apply_frame_format(struct vd55g1_dev *sensor)
 	return ret;
 }
 
-static int vd55g1_set_gpios(struct vd55g1_dev *sensor)
+static int vd55g1_set_gpios(struct vd55g1 *sensor)
 {
 	struct vd55g1_gpios *gpios = &sensor->gpios;
 	int ret;
@@ -1097,7 +1097,7 @@ static int vd55g1_set_gpios(struct vd55g1_dev *sensor)
 	return ret;
 }
 
-static int vd55g1_stream_enable(struct vd55g1_dev *sensor)
+static int vd55g1_stream_enable(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 	int ret;
@@ -1150,7 +1150,7 @@ err_rpm_put:
 	return ret;
 }
 
-static void vd55g1_save_exposure(struct vd55g1_dev *sensor)
+static void vd55g1_save_exposure(struct vd55g1 *sensor)
 {
 	u32 val;
 
@@ -1162,7 +1162,7 @@ static void vd55g1_save_exposure(struct vd55g1_dev *sensor)
 	sensor->cold_start.analog_gain = val < 0 ? 0 : val;
 }
 
-static int vd55g1_stream_disable(struct vd55g1_dev *sensor)
+static int vd55g1_stream_disable(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 	int ret;
@@ -1189,7 +1189,7 @@ err_str_dis:
 	return ret;
 }
 
-static int vd55g1_tx_from_ep(struct vd55g1_dev *sensor,
+static int vd55g1_tx_from_ep(struct vd55g1 *sensor,
 			     struct fwnode_handle *handle)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -1272,7 +1272,7 @@ error_ep:
 	return -EINVAL;
 }
 
-static int vd55g1_patch(struct vd55g1_dev *sensor)
+static int vd55g1_patch(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	u32 patch;
@@ -1309,7 +1309,7 @@ static int vd55g1_patch(struct vd55g1_dev *sensor)
 	return 0;
 }
 
-static int vd55g1_configure(struct vd55g1_dev *sensor)
+static int vd55g1_configure(struct vd55g1 *sensor)
 {
 	/* Double data rate */
 	u32 mipi_bps = link_freq[0] * 2;
@@ -1338,12 +1338,12 @@ static int vd55g1_configure(struct vd55g1_dev *sensor)
 	return ret;
 }
 
-static inline bool vd55g1_can_be_slave(struct vd55g1_dev *sensor)
+static inline bool vd55g1_can_be_slave(struct vd55g1 *sensor)
 {
 	return sensor->gpios.in_sync != ~0;
 }
 
-static void vd55g1_update_hblank_ctrl(struct vd55g1_dev *sensor)
+static void vd55g1_update_hblank_ctrl(struct vd55g1 *sensor)
 {
 	int height = sensor->current_mode->crop.height;
 
@@ -1362,7 +1362,7 @@ static void vd55g1_update_hblank_ctrl(struct vd55g1_dev *sensor)
 
 static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
 {
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	int ret = 0;
 
 	mutex_lock(&sensor->lock);
@@ -1397,7 +1397,7 @@ static int vd55g1_get_selection(struct v4l2_subdev *sd,
 				struct v4l2_subdev_selection *sel)
 #endif
 {
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP:
@@ -1444,7 +1444,7 @@ static int vd55g1_get_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_format *format)
 #endif
 {
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct v4l2_mbus_framefmt *fmt;
 
 	mutex_lock(&sensor->lock);
@@ -1477,7 +1477,7 @@ static int vd55g1_set_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_format *format)
 #endif
 {
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	const struct vd55g1_mode_info *new_mode;
 	struct v4l2_mbus_framefmt *fmt;
 	unsigned int expo_max, hblank;
@@ -1537,7 +1537,7 @@ static int vd55g1_init_cfg(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_state *sd_state)
 #endif
 {
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct v4l2_subdev_format fmt = { 0 };
 
 	vd55g1_fill_framefmt(sensor, sensor->current_mode, &fmt.format,
@@ -1600,7 +1600,7 @@ static const struct media_entity_operations vd55g1_subdev_entity_ops = {
 static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	int temperature;
 	int ret;
 
@@ -1625,7 +1625,7 @@ static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	unsigned int expo_max;
 	int ret;
 
@@ -1752,7 +1752,7 @@ static const struct v4l2_ctrl_config vd55g1_hdr_ctrl = {
 	.qmenu		= vd55g1_hdr_mode_menu,
 };
 
-static int vd55g1_init_controls(struct vd55g1_dev *sensor)
+static int vd55g1_init_controls(struct vd55g1 *sensor)
 {
 	const struct v4l2_ctrl_ops *ops = &vd55g1_ctrl_ops;
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
@@ -1844,7 +1844,7 @@ free_ctrls:
 	return ret;
 }
 
-static int vd55g1_detect_cut_version(struct vd55g1_dev *sensor)
+static int vd55g1_detect_cut_version(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	u32 device_rev;
@@ -1868,7 +1868,7 @@ static int vd55g1_detect_cut_version(struct vd55g1_dev *sensor)
 	}
 }
 
-static int vd55g1_detect(struct vd55g1_dev *sensor)
+static int vd55g1_detect(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	u32 id;
@@ -1895,7 +1895,7 @@ static int vd55g1_power_on(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	int ret;
 
 	ret = regulator_bulk_enable(ARRAY_SIZE(vd55g1_supply_name),
@@ -1956,7 +1956,7 @@ static int vd55g1_power_off(struct device *dev)
 {
 	struct i2c_client *client = to_i2c_client(dev);
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 
 	clk_disable_unprepare(sensor->xclk);
 	regulator_bulk_disable(ARRAY_SIZE(vd55g1_supply_name),
@@ -1964,7 +1964,7 @@ static int vd55g1_power_off(struct device *dev)
 	return 0;
 }
 
-static int vd55g1_parse_dt_gpios_array(struct vd55g1_dev *sensor,
+static int vd55g1_parse_dt_gpios_array(struct vd55g1 *sensor,
 				       char *prop_name, u32 *array, int *nb)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -1987,7 +1987,7 @@ static int vd55g1_parse_dt_gpios_array(struct vd55g1_dev *sensor,
 	return 0;
 }
 
-static int vd55g1_parse_dt_gpios(struct vd55g1_dev *sensor)
+static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	struct device_node *np = client->dev.of_node;
@@ -2058,7 +2058,7 @@ static int vd55g1_parse_dt_gpios(struct vd55g1_dev *sensor)
 	return 0;
 }
 
-static void vd55g1_subdev_cleanup(struct vd55g1_dev *sensor)
+static void vd55g1_subdev_cleanup(struct vd55g1 *sensor)
 {
 	v4l2_async_unregister_subdev(&sensor->sd);
 	mutex_destroy(&sensor->lock);
@@ -2070,7 +2070,7 @@ static int vd55g1_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct fwnode_handle *handle;
-	struct vd55g1_dev *sensor;
+	struct vd55g1 *sensor;
 	int ret;
 
 	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
@@ -2219,7 +2219,7 @@ static void vd55g1_remove(struct i2c_client *client)
 #endif
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 
 	vd55g1_subdev_cleanup(sensor);
 
