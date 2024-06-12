@@ -5,8 +5,6 @@
  * Copyright (C) 2023 STMicroelectronics SA
  */
 
-#include <linux/version.h>
-
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
@@ -14,6 +12,7 @@
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 
 #include <asm/unaligned.h>
@@ -25,12 +24,27 @@
 #include <media/v4l2-subdev.h>
 
 /* Backward compatibility */
+#include <linux/version.h>
+
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+/*
+ * Warning : CCI_REGxy_LE definitions doesn't fit exactly with v4l2-cci.h .
+ * In fact endianness is managed directly in vd55g1_read/write() functions.
+ */
+#include <linux/bitfield.h>
+#define CCI_REG_ADDR_MASK		GENMASK(15, 0)
+#define CCI_REG_WIDTH_SHIFT		16
+#define CCI_REG_ADDR(x)			FIELD_GET(CCI_REG_ADDR_MASK, x)
+#define CCI_REG8(x)			((1 << CCI_REG_WIDTH_SHIFT) | (x))
+#define CCI_REG16_LE(x)			((2 << CCI_REG_WIDTH_SHIFT) | (x))
+#define CCI_REG32_LE(x)			((4 << CCI_REG_WIDTH_SHIFT) | (x))
+#else
+#include <media/v4l2-cci.h>
+#endif
+
 #if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
 #define MIPI_CSI2_DT_RAW8	0x2a
 #define MIPI_CSI2_DT_RAW10	0x2b
-#define MIPI_CSI2_DT_RAW12	0x2c
-#define MIPI_CSI2_DT_RAW14	0x2d
-#define MIPI_CSI2_DT_RAW16	0x2e
 #else
 #include <media/mipi-csi2.h>
 #endif
@@ -42,98 +56,93 @@
 #include <linux/units.h>
 #endif
 
-#define VD55G1_REG_8BIT(n)				((1 << 16) | (n))
-#define VD55G1_REG_16BIT(n)				((2 << 16) | (n))
-#define VD55G1_REG_32BIT(n)				((4 << 16) | (n))
-#define VD55G1_REG_SIZE_SHIFT				16
-#define VD55G1_REG_ADDR_MASK				0xffff
-
-#define VD55G1_REG_MODEL_ID				VD55G1_REG_32BIT(0x0000)
+/* Register Map */
+#define VD55G1_REG_MODEL_ID				CCI_REG32_LE(0x0000)
 #define VD55G1_MODEL_ID					0x53354731
-#define VD55G1_REG_REVISION				VD55G1_REG_16BIT(0x0004)
+#define VD55G1_REG_REVISION				CCI_REG16_LE(0x0004)
 #define VD55G1_REVISION_CUT_1				0x1010
 #define VD55G1_REVISION_CUT_2				0x2020
-#define VD55G1_REG_FWPATCH_REVISION			VD55G1_REG_16BIT(0x0012)
-#define VD55G1_REG_FWPATCH_START_ADDR			VD55G1_REG_8BIT(0x2000)
-#define VD55G1_REG_SYSTEM_FSM				VD55G1_REG_8BIT(0x001c)
+#define VD55G1_REG_FWPATCH_REVISION			CCI_REG16_LE(0x0012)
+#define VD55G1_REG_FWPATCH_START_ADDR			CCI_REG8(0x2000)
+#define VD55G1_REG_SYSTEM_FSM				CCI_REG8(0x001c)
 #define VD55G1_SYSTEM_FSM_READY_TO_BOOT			0x01
 #define VD55G1_SYSTEM_FSM_SW_STBY			0x02
 #define VD55G1_SYSTEM_FSM_STREAMING			0x03
-#define VD55G1_REG_TEMPERATURE				VD55G1_REG_16BIT(0x003c)
-#define VD55G1_REG_BOOT					VD55G1_REG_8BIT(0x0200)
+#define VD55G1_REG_TEMPERATURE				CCI_REG16_LE(0x003c)
+#define VD55G1_REG_BOOT					CCI_REG8(0x0200)
 #define VD55G1_BOOT_BOOT				1
 #define VD55G1_BOOT_PATCH_SETUP				2
-#define VD55G1_REG_STBY					VD55G1_REG_8BIT(0x0201)
+#define VD55G1_REG_STBY					CCI_REG8(0x0201)
 #define VD55G1_STBY_START_STREAM			1
 #define VD55G1_STBY_THSENS_READ				4
-#define VD55G1_REG_STREAMING				VD55G1_REG_8BIT(0x0202)
+#define VD55G1_REG_STREAMING				CCI_REG8(0x0202)
 #define VD55G1_STREAMING_STOP_STREAM			1
-#define VD55G1_REG_EXT_CLOCK				VD55G1_REG_32BIT(0x0220)
-#define VD55G1_REG_LINE_LENGTH				VD55G1_REG_16BIT(0x0300)
-#define VD55G1_REG_ORIENTATION				VD55G1_REG_8BIT(0x0302)
-#define VD55G1_REG_FORMAT_CTRL				VD55G1_REG_8BIT(0x030a)
-#define VD55G1_REG_OIF_CTRL				VD55G1_REG_16BIT(0x030c)
-#define VD55G1_REG_OIF_IMG_CTRL				VD55G1_REG_8BIT(0x030f)
-#define VD55G1_REG_MIPI_DATA_RATE			VD55G1_REG_32BIT(0x0224)
-#define VD55G1_REG_PATGEN_CTRL				VD55G1_REG_16BIT(0x0304)
+#define VD55G1_REG_EXT_CLOCK				CCI_REG32_LE(0x0220)
+#define VD55G1_REG_LINE_LENGTH				CCI_REG16_LE(0x0300)
+#define VD55G1_REG_ORIENTATION				CCI_REG8(0x0302)
+#define VD55G1_REG_FORMAT_CTRL				CCI_REG8(0x030a)
+#define VD55G1_REG_OIF_CTRL				CCI_REG16_LE(0x030c)
+#define VD55G1_REG_OIF_IMG_CTRL				CCI_REG8(0x030f)
+#define VD55G1_REG_MIPI_DATA_RATE			CCI_REG32_LE(0x0224)
+#define VD55G1_REG_PATGEN_CTRL				CCI_REG16_LE(0x0304)
 #define VD55G1_PATGEN_TYPE_SHIFT			4
 #define VD55G1_PATGEN_ENABLE				BIT(0)
-#define VD55G1_REG_MANUAL_ANALOG_GAIN			VD55G1_REG_8BIT(0x0501)
-#define VD55G1_REG_MANUAL_COARSE_EXPOSURE		VD55G1_REG_16BIT(0x0502)
-#define VD55G1_REG_MANUAL_DIGITAL_GAIN			VD55G1_REG_16BIT(0x0504)
-#define VD55G1_REG_APPLIED_COARSE_EXPOSURE		VD55G1_REG_16BIT(0x00e8)
-#define VD55G1_REG_APPLIED_ANALOG_GAIN			VD55G1_REG_16BIT(0x00ea)
-#define VD55G1_REG_APPLIED_DIGITAL_GAIN			VD55G1_REG_16BIT(0x00ec)
-#define VD55G1_REG_AE_FORCE_COLDSTART			VD55G1_REG_16BIT(0x0308)
-#define VD55G1_REG_AE_COLDSTART_EXP_TIME		VD55G1_REG_32BIT(0x0374)
-#define VD55G1_REG_READOUT_CTRL				VD55G1_REG_8BIT(0x052e)
-#define VD55G1_REG_DARKCAL_CTRL				VD55G1_REG_8BIT(0x032a)
+#define VD55G1_REG_MANUAL_ANALOG_GAIN			CCI_REG8(0x0501)
+#define VD55G1_REG_MANUAL_COARSE_EXPOSURE		CCI_REG16_LE(0x0502)
+#define VD55G1_REG_MANUAL_DIGITAL_GAIN			CCI_REG16_LE(0x0504)
+#define VD55G1_REG_APPLIED_COARSE_EXPOSURE		CCI_REG16_LE(0x00e8)
+#define VD55G1_REG_APPLIED_ANALOG_GAIN			CCI_REG16_LE(0x00ea)
+#define VD55G1_REG_APPLIED_DIGITAL_GAIN			CCI_REG16_LE(0x00ec)
+#define VD55G1_REG_AE_FORCE_COLDSTART			CCI_REG16_LE(0x0308)
+#define VD55G1_REG_AE_COLDSTART_EXP_TIME		CCI_REG32_LE(0x0374)
+#define VD55G1_REG_READOUT_CTRL				CCI_REG8(0x052e)
+#define VD55G1_REG_DARKCAL_CTRL				CCI_REG8(0x032a)
 #define VD55G1_DARKCAL_BYPASS				0
 #define VD55G1_DARKCAL_AUTO				1
-#define VD55G1_REG_DUSTER_CTRL				VD55G1_REG_8BIT(0x03ea)
+#define VD55G1_REG_DUSTER_CTRL				CCI_REG8(0x03ea)
 #define VD55G1_DUSTER_ENABLE				BIT(0)
 #define VD55G1_DUSTER_DISABLE				0
 #define VD55G1_DUSTER_DYN_ENABLE			BIT(1)
 #define VD55G1_DUSTER_RING_ENABLE			BIT(4)
-#define VD55G1_REG_AE_TARGET_PERCENTAGE			VD55G1_REG_8BIT(0x0486)
-#define VD55G1_REG_VT_CTRL				VD55G1_REG_8BIT(0x0309)
+#define VD55G1_REG_AE_TARGET_PERCENTAGE			CCI_REG8(0x0486)
+#define VD55G1_REG_VT_CTRL				CCI_REG8(0x0309)
 #define VD55G1_VT_SLAVE_GPIO				1
-#define VD55G1_REG_ERROR_CODE				VD55G1_REG_16BIT(0x0010)
-#define VD55G1_REG_NEXT_CTX				VD55G1_REG_16BIT(0x03e4)
-#define VD55G1_REG_EXPOSURE_USE_CASES			VD55G1_REG_8BIT(0x0312)
+#define VD55G1_REG_ERROR_CODE				CCI_REG16_LE(0x0010)
+#define VD55G1_REG_NEXT_CTX				CCI_REG16_LE(0x03e4)
+#define VD55G1_REG_EXPOSURE_USE_CASES			CCI_REG8(0x0312)
 #define VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT		BIT(2)
 
 #define VD55G1_REG_EXP_MODE(ctx) \
-	VD55G1_REG_8BIT(0x0500 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG8(0x0500 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_EXP_MODE_AUTO				0
 #define VD55G1_EXP_MODE_FREEZE				1
 #define VD55G1_EXP_MODE_MANUAL				2
 #define VD55G1_REG_FRAME_LENGTH(ctx) \
-	VD55G1_REG_32BIT(0x050c + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG32_LE(0x050c + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_X_START(ctx) \
-	VD55G1_REG_16BIT(0x0514 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG16_LE(0x0514 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_X_WIDTH(ctx) \
-	VD55G1_REG_16BIT(0x0516 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG16_LE(0x0516 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_Y_START(ctx) \
-	VD55G1_REG_16BIT(0x0510 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG16_LE(0x0510 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_Y_HEIGHT(ctx) \
-	VD55G1_REG_16BIT(0x0512 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG16_LE(0x0512 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_GPIO_0_CTRL(ctx) \
-	VD55G1_REG_8BIT(0x051d + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG8(0x051d + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_DARKCAL_PEDESTAL(ctx) \
-	VD55G1_REG_16BIT(0x0526 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG16_LE(0x0526 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_CTX_REPEAT_COUNT(ctx) \
-	VD55G1_REG_16BIT(0x03dc + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG16_LE(0x03dc + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_VT_MODE(ctx) \
-	VD55G1_REG_8BIT(0x0536 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG8(0x0536 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_VT_MODE_NORMAL 0
 #define VD55G1_VT_MODE_SUBTRACTION 1
 #define VD55G1_REG_MASK_FRAME_CTRL(ctx) \
-	VD55G1_REG_8BIT(0x0537 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG8(0x0537 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_MASK_FRAME_CTRL_OUTPUT 0
 #define VD55G1_MASK_FRAME_CTRL_MASK 1
 #define VD55G1_REG_EXPOSURE_INSTANCE(ctx) \
-	VD55G1_REG_32BIT(0x52D + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG32_LE(0x52D + VD55G1_CTX_OFFSET * (ctx))
 
 #define VD55G1_WIDTH					804
 #define VD55G1_HEIGHT					704
@@ -186,9 +195,9 @@ static const char * const vd55g1_hdr_mode_menu[] = {
 };
 
 static const char * const vd55g1_supply_name[] = {
-	"VCORE",
-	"VDDIO",
-	"VANA",
+	"vcore",
+	"vddio",
+	"vana",
 };
 
 static const s64 link_freq[] = {
@@ -243,6 +252,16 @@ static const struct vd55g1_fmt_desc vd55g1_supported_codes[] = {
 		.data_type = MIPI_CSI2_DT_RAW10,
 	},
 };
+
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+/* Big endian register addresses and 8b, 16b or 32b little endian values. */
+static const struct regmap_config vd55g1_regmap_config = {
+	.reg_bits = 16,
+	.val_bits = 8,
+	.reg_format_endian = REGMAP_ENDIAN_BIG,
+};
+#endif
+
 
 static const struct vd55g1_mode_info vd55g1_mode_data[] = {
 	{
@@ -323,6 +342,7 @@ struct vd55g1_dev {
 	struct regulator_bulk_data supplies[ARRAY_SIZE(vd55g1_supply_name)];
 	struct gpio_desc *reset_gpio;
 	struct clk *xclk;
+	struct regmap *regmap;
 	u32 clk_freq;
 	u16 oif_ctrl;
 	int nb_of_lane;
@@ -412,153 +432,152 @@ static s32 get_pixel_rate(struct vd55g1_dev *sensor)
 			 get_bpp_by_code(sensor->fmt.code));
 }
 
-static int get_chunk_size(struct vd55g1_dev *sensor)
-{
-	int max_write_len = VD55G1_WRITE_MULTIPLE_CHUNK_MAX;
-	struct i2c_adapter *adapter = sensor->i2c_client->adapter;
-
-	if (adapter->quirks && adapter->quirks->max_write_len)
-		max_write_len = adapter->quirks->max_write_len - 2;
-
-	max_write_len = min(max_write_len, VD55G1_WRITE_MULTIPLE_CHUNK_MAX);
-
-	return max(max_write_len, 1);
-}
-
-static int vd55g1_read_multiple(struct vd55g1_dev *sensor, u32 reg,
-				unsigned int len)
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+static int vd55g1_read(struct vd55g1_dev *sensor, u32 reg, u32 *val, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	struct i2c_msg msg[2];
-	u8 buf[2];
-	u8 val[sizeof(u32)] = {0};
-	int ret;
-
-	if (len > sizeof(u32))
-		return -EINVAL;
-	buf[0] = reg >> 8;
-	buf[1] = reg & 0xff;
-
-	msg[0].addr = client->addr;
-	msg[0].flags = client->flags;
-	msg[0].buf = buf;
-	msg[0].len = sizeof(buf);
-
-	msg[1].addr = client->addr;
-	msg[1].flags = client->flags | I2C_M_RD;
-	msg[1].buf = val;
-	msg[1].len = len;
-
-	ret = i2c_transfer(client->adapter, msg, 2);
-	if (ret < 0) {
-		dev_dbg(&client->dev, "%s: %x i2c_transfer, reg: %x => %d\n",
-			__func__, client->addr, reg, ret);
-		return ret;
-	}
-
-	return get_unaligned_le32(val);
-}
-
-static inline int vd55g1_read_reg(struct vd55g1_dev *sensor, u32 reg)
-{
-	return vd55g1_read_multiple(sensor, reg & VD55G1_REG_ADDR_MASK,
-				     (reg >> VD55G1_REG_SIZE_SHIFT) & 7);
-}
-
-static int vd55g1_write_multiple(struct vd55g1_dev *sensor, u32 reg,
-				 const u8 *data, unsigned int len, int *err)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	struct i2c_msg msg;
-	u8 buf[VD55G1_WRITE_MULTIPLE_CHUNK_MAX + 2];
-	unsigned int i;
+	unsigned int len = (reg >> CCI_REG_WIDTH_SHIFT) & 7;
+	u8 buf[4];
 	int ret;
 
 	if (err && *err)
 		return *err;
 
-	if (len > VD55G1_WRITE_MULTIPLE_CHUNK_MAX || len == 0)
-		return -EINVAL;
-	buf[0] = reg >> 8;
-	buf[1] = reg & 0xff;
-	for (i = 0; i < len; i++)
-		buf[i + 2] = data[i];
+	reg = reg & CCI_REG_ADDR_MASK;
 
-	msg.addr = client->addr;
-	msg.flags = client->flags;
-	msg.buf = buf;
-	msg.len = len + 2;
-
-	ret = i2c_transfer(client->adapter, &msg, 1);
-	if (ret < 0) {
-		dev_dbg(&client->dev, "%s: i2c_transfer, reg: %x => %d\n",
+	ret = regmap_bulk_read(sensor->regmap, reg, buf, len);
+	if (ret) {
+		dev_err(&client->dev, "%s: Error reading reg 0x%4x: %d\n",
 			__func__, reg, ret);
-		if (err)
-			*err = ret;
-		return ret;
+		goto out;
 	}
 
-	return 0;
+	switch (len) {
+	case 1:
+		*val = buf[0];
+		break;
+	case 2:
+		*val = get_unaligned_le16(buf);
+		break;
+	case 4:
+		*val = get_unaligned_le32(buf);
+		break;
+	default:
+		dev_err(&client->dev,
+			"%s: Error invalid reg-width %u for reg 0x%04x\n",
+			__func__, len, reg);
+		ret = -EINVAL;
+		break;
+	}
+
+out:
+	if (ret && err)
+		*err = ret;
+
+	return ret;
 }
 
-static int vd55g1_write_array(struct vd55g1_dev *sensor, u32 reg,
-			      unsigned int nb, const u8 *array)
+static int vd55g1_write(struct vd55g1_dev *sensor, u32 reg, u32 val, int *err)
 {
-	const unsigned int chunk_size = get_chunk_size(sensor);
+	struct i2c_client *client = sensor->i2c_client;
+	unsigned int len = (reg >> CCI_REG_WIDTH_SHIFT) & 7;
+	u8 buf[4];
 	int ret;
-	unsigned int sz;
 
-	while (nb) {
-		sz = min(nb, chunk_size);
-		ret = vd55g1_write_multiple(sensor, reg, array, sz, NULL);
+	if (err && *err)
+		return *err;
+
+	reg = reg & CCI_REG_ADDR_MASK;
+	switch (len) {
+	case 1:
+		buf[0] = val;
+		break;
+	case 2:
+		put_unaligned_le16(val, buf);
+		break;
+	case 4:
+		put_unaligned_le32(val, buf);
+		break;
+	default:
+		dev_err(&client->dev,
+			"%s: Error invalid reg-width %u for reg 0x%04x\n",
+			__func__, len, reg);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ret = regmap_bulk_write(sensor->regmap, reg, buf, len);
+	if (ret)
+		dev_err(&client->dev, "%s: Error writing reg 0x%4x: %d\n",
+			__func__, reg, ret);
+
+out:
+	if (ret && err)
+		*err = ret;
+
+	return ret;
+}
+#else
+#define vd55g1_read(sensor, reg, val, err) \
+	cci_read((sensor)->regmap, reg, (u64 *)val, err)
+
+#define vd55g1_write(sensor, reg, val, err) \
+	cci_write((sensor)->regmap, reg, (u64)val, err)
+#endif
+
+static int vd55g1_write_array(struct vd55g1_dev *sensor, u32 reg, unsigned int len,
+			      const u8 *array, int *err)
+{
+	unsigned int chunk_sz = 1024;
+	unsigned int sz;
+	int ret;
+
+	if (err && *err)
+		return *err;
+
+	/*
+	 * This loop isn't necessary but in certains conditions (platforms, cpu
+	 * load, etc.) it has been observed that the bulk write could timeout.
+	 */
+	while (len) {
+		sz = min(len, chunk_sz);
+		ret = regmap_bulk_write(sensor->regmap, reg, array, sz);
 		if (ret < 0)
-			return ret;
-		nb -= sz;
+			goto out;
+		len -= sz;
 		reg += sz;
 		array += sz;
 	}
 
-	return 0;
-}
+out:
+	if (ret && err)
+		*err = ret;
 
-static inline int vd55g1_write_reg(struct vd55g1_dev *sensor, u32 reg, u32 val,
-				   int *err)
-{
-	return vd55g1_write_multiple(sensor, reg & VD55G1_REG_ADDR_MASK,
-				     (u8 *)&val,
-				     (reg >> VD55G1_REG_SIZE_SHIFT) & 7, err);
+	return ret;
 }
 
 static int vd55g1_poll_reg(struct vd55g1_dev *sensor, u32 reg, u8 poll_val,
-			   unsigned int timeout_ms)
+			   int *err)
 {
-	const unsigned int loop_delay_ms = 10;
+	unsigned int val = 0;
 	int ret;
-#if KERNEL_VERSION(5, 7, 0) > LINUX_VERSION_CODE
-	int loop_nb = timeout_ms / loop_delay_ms;
 
-	while (--loop_nb) {
-		ret = vd55g1_read_reg(sensor, reg);
-		if (ret < 0)
-			return ret;
-		if (ret == poll_val)
-			return 0;
-		msleep(loop_delay_ms);
-	}
-	return -ETIMEDOUT;
-#else
-	return read_poll_timeout(vd55g1_read_reg, ret,
-				 ((ret < 0) || (ret == poll_val)),
-				 loop_delay_ms * 1000, timeout_ms * 1000,
-				 false, sensor, reg);
-#endif
+	if (err && *err)
+		return *err;
+
+	ret = regmap_read_poll_timeout(sensor->regmap, CCI_REG_ADDR(reg), val,
+				       (val == poll_val), 2000,
+				       500 * USEC_PER_MSEC);
+
+	if (ret && err)
+		*err = ret;
+
+	return ret;
 }
 
-static int vd55g1_wait_state(struct vd55g1_dev *sensor, int state,
-			     unsigned int timeout_ms)
+static int vd55g1_wait_state(struct vd55g1_dev *sensor, int state, int *err)
 {
-	return vd55g1_poll_reg(sensor, VD55G1_REG_SYSTEM_FSM, state,
-			       timeout_ms);
+	return vd55g1_poll_reg(sensor, VD55G1_REG_SYSTEM_FSM, state, err);
 }
 
 static int vd55g1_update_gpio_mode(struct vd55g1_dev *sensor, u32 mode,
@@ -569,13 +588,13 @@ static int vd55g1_update_gpio_mode(struct vd55g1_dev *sensor, u32 mode,
 
 	if (sensor->hdr == VD55G1_HDR_SUB && mode == VD55G1_GPIO_MODE_STROBE) {
 		/* Make its context 1 counterpart strobe too */
-		ret = vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(1) + gpio,
+		ret = vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(1) + gpio,
 				       index2val[mode], NULL);
 		if (ret)
 			return ret;
 	}
 
-	return vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(0) + gpio,
+	return vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(0) + gpio,
 				index2val[mode], NULL);
 }
 
@@ -602,7 +621,7 @@ static int vd55g1_apply_exposure_auto(struct vd55g1_dev *sensor)
 	int ret;
 
 	if (sensor->hdr == VD55G1_HDR_SUB) {
-		ret = vd55g1_write_reg(sensor, VD55G1_REG_EXP_MODE(1),
+		ret = vd55g1_write(sensor, VD55G1_REG_EXP_MODE(1),
 				       VD55G1_EXP_BYPASS, NULL);
 		if (ret)
 			return ret;
@@ -611,7 +630,7 @@ static int vd55g1_apply_exposure_auto(struct vd55g1_dev *sensor)
 	if (sensor->ae_frozen && sensor->expo_state == VD55G1_EXP_AUTO)
 		exp = VD55G1_EXP_FREEZE;
 
-	return vd55g1_write_reg(sensor, VD55G1_REG_EXP_MODE(0), exp, NULL);
+	return vd55g1_write(sensor, VD55G1_REG_EXP_MODE(0), exp, NULL);
 }
 
 static int vd55g1_get_regulators(struct vd55g1_dev *sensor)
@@ -648,12 +667,12 @@ static int vd55g1_apply_patgen(struct vd55g1_dev *sensor)
 		duster = VD55G1_DUSTER_DISABLE;
 	}
 
-	vd55g1_write_reg(sensor, VD55G1_REG_DARKCAL_CTRL, darkcal, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_DUSTER_CTRL, duster, &ret);
+	vd55g1_write(sensor, VD55G1_REG_DARKCAL_CTRL, darkcal, &ret);
+	vd55g1_write(sensor, VD55G1_REG_DUSTER_CTRL, duster, &ret);
 	if (ret)
 		return ret;
 
-	return vd55g1_write_reg(sensor, VD55G1_REG_PATGEN_CTRL, reg, NULL);
+	return vd55g1_write(sensor, VD55G1_REG_PATGEN_CTRL, reg, NULL);
 }
 
 static int vd55g1_apply_flash(struct vd55g1_dev *sensor)
@@ -672,9 +691,9 @@ static int vd55g1_apply_darkcal_pedestal(struct vd55g1_dev *sensor)
 {
 	int ret = 0;
 
-	vd55g1_write_reg(sensor, VD55G1_REG_DARKCAL_PEDESTAL(0),
+	vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(0),
 			 sensor->darkcal_pedestal, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_DARKCAL_PEDESTAL(1),
+	vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(1),
 			 sensor->darkcal_pedestal, &ret);
 
 	return ret;
@@ -721,11 +740,12 @@ static int vd55g1_lock_exposure(struct vd55g1_dev *sensor,
 
 static int vd55g1_get_temp_stream_enable(struct vd55g1_dev *sensor, int *temp)
 {
-	int temperature;
+	u32 temperature;
+	int ret;
 
-	temperature = vd55g1_read_reg(sensor, VD55G1_REG_TEMPERATURE);
-	if (temperature < 0)
-		return temperature;
+	ret = vd55g1_read(sensor, VD55G1_REG_TEMPERATURE, &temperature, NULL);
+	if (ret)
+		return ret;
 
 	/* temperature is signed 10 bits value. extend sign */
 	temperature = (temperature << 6) >> 6;
@@ -739,13 +759,13 @@ static int vd55g1_apply_framelength(struct vd55g1_dev *sensor)
 	int ret = 0;
 
 	if (sensor->hdr == VD55G1_HDR_SUB) {
-		vd55g1_write_reg(sensor, VD55G1_REG_FRAME_LENGTH(1),
+		vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(1),
 				 sensor->frame_length, &ret);
 		if (ret)
 			return ret;
 	}
 
-	return vd55g1_write_reg(sensor, VD55G1_REG_FRAME_LENGTH(0),
+	return vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(0),
 				sensor->frame_length, NULL);
 }
 
@@ -764,11 +784,11 @@ static int vd55g1_get_temp_stream_disable(struct vd55g1_dev *sensor, int *temp)
 	int ret;
 
 	/* request temperature read */
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_STBY,
+	ret = vd55g1_write(sensor, VD55G1_REG_STBY,
 			       VD55G1_STBY_THSENS_READ, NULL);
 	if (ret)
 		return ret;
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, VD55G1_TIMEOUT_MS);
+	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, NULL);
 	if (ret)
 		return ret;
 
@@ -789,7 +809,7 @@ static int vd55g1_update_analog_gain(struct vd55g1_dev *sensor, u32 target)
 	sensor->analog_gain = target;
 
 	if (sensor->streaming)
-		return vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
+		return vd55g1_write(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
 					target, NULL);
 	return 0;
 }
@@ -799,7 +819,7 @@ static int vd55g1_update_digital_gain(struct vd55g1_dev *sensor, u32 target)
 	sensor->digital_gain = target;
 
 	if (sensor->streaming)
-		return vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
+		return vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
 					target, NULL);
 	return 0;
 }
@@ -808,7 +828,7 @@ static int vd55g1_update_exposure(struct vd55g1_dev *sensor, int expo_ms)
 {
 	sensor->manual_expo = expo_ms;
 	if (sensor->streaming)
-		return vd55g1_write_reg(sensor,
+		return vd55g1_write(sensor,
 					VD55G1_REG_MANUAL_COARSE_EXPOSURE,
 					sensor->manual_expo, NULL);
 
@@ -837,7 +857,7 @@ static int vd55g1_update_exposure_target(struct vd55g1_dev *sensor, int index)
 
 	sensor->exposure_target = index2exposure_target[index];
 	if (sensor->streaming)
-		return vd55g1_write_reg(sensor, VD55G1_REG_AE_TARGET_PERCENTAGE,
+		return vd55g1_write(sensor, VD55G1_REG_AE_TARGET_PERCENTAGE,
 					sensor->exposure_target, NULL);
 
 	return 0;
@@ -860,8 +880,7 @@ static int vd55g1_apply_reset(struct vd55g1_dev *sensor)
 	usleep_range(5000, 10000);
 	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
 	usleep_range(5000, 10000);
-	return vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_READY_TO_BOOT,
-				 VD55G1_TIMEOUT_MS);
+	return vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_READY_TO_BOOT, NULL);
 }
 
 static void vd55g1_fill_framefmt(struct vd55g1_dev *sensor,
@@ -922,8 +941,8 @@ static int vd55g1_apply_cold_start(struct vd55g1_dev *sensor)
 			       line_time_us;
 	int ret = 0;
 
-	vd55g1_write_reg(sensor, VD55G1_REG_AE_FORCE_COLDSTART, 1, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_AE_COLDSTART_EXP_TIME, expo_us,
+	vd55g1_write(sensor, VD55G1_REG_AE_FORCE_COLDSTART, 1, &ret);
+	vd55g1_write(sensor, VD55G1_REG_AE_COLDSTART_EXP_TIME, expo_us,
 			 &ret);
 
 	return ret;
@@ -935,37 +954,37 @@ static int vd55g1_apply_hdr_mode(struct vd55g1_dev *sensor)
 
 	switch (sensor->hdr) {
 	case VD55G1_NO_HDR:
-		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_USE_CASES, 0,
+		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_USE_CASES, 0,
 				 &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_NEXT_CTX, 0x0, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_CTX_REPEAT_COUNT(0), 1,
+		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x0, &ret);
+		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT(0), 1,
 				 &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_VT_MODE(0),
+		vd55g1_write(sensor, VD55G1_REG_VT_MODE(0),
 				 VD55G1_VT_MODE_NORMAL, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
+		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
 				 VD55G1_MASK_FRAME_CTRL_OUTPUT, &ret);
 		break;
 	case VD55G1_HDR_SUB:
-		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_USE_CASES,
+		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_USE_CASES,
 				 VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_NEXT_CTX, 0x1, &ret);
+		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x1, &ret);
 
-		vd55g1_write_reg(sensor, VD55G1_REG_CTX_REPEAT_COUNT(0), 1,
+		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT(0), 1,
 				 &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_VT_MODE(0),
+		vd55g1_write(sensor, VD55G1_REG_VT_MODE(0),
 				 VD55G1_VT_MODE_NORMAL, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
+		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
 				 VD55G1_MASK_FRAME_CTRL_MASK, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_INSTANCE(0), 0,
+		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_INSTANCE(0), 0,
 				 &ret);
 
-		vd55g1_write_reg(sensor, VD55G1_REG_CTX_REPEAT_COUNT(1), 1,
+		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT(1), 1,
 				 &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_VT_MODE(1),
+		vd55g1_write(sensor, VD55G1_REG_VT_MODE(1),
 				 VD55G1_VT_MODE_SUBTRACTION, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_MASK_FRAME_CTRL(1),
+		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(1),
 				 VD55G1_MASK_FRAME_CTRL_OUTPUT, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_INSTANCE(1), 1,
+		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_INSTANCE(1), 1,
 				 &ret);
 		break;
 	default:
@@ -993,11 +1012,11 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 	if (ret)
 		return ret;
 
-	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_COARSE_EXPOSURE,
+	vd55g1_write(sensor, VD55G1_REG_MANUAL_COARSE_EXPOSURE,
 			 sensor->manual_expo, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
+	vd55g1_write(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
 			 sensor->analog_gain, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
+	vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
 			 sensor->digital_gain, &ret);
 	if (ret)
 		return ret;
@@ -1006,7 +1025,7 @@ static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
 	if (ret)
 		return ret;
 
-	vd55g1_write_reg(sensor, VD55G1_REG_ORIENTATION,
+	vd55g1_write(sensor, VD55G1_REG_ORIENTATION,
 			 sensor->hflip | (sensor->vflip << 1), &ret);
 
 	ret = vd55g1_apply_darkcal_pedestal(sensor);
@@ -1025,18 +1044,18 @@ static int vd55g1_apply_frame_format(struct vd55g1_dev *sensor)
 	const struct v4l2_rect *crop = &sensor->current_mode->crop;
 	int ret = 0;
 
-	vd55g1_write_reg(sensor, VD55G1_REG_READOUT_CTRL,
+	vd55g1_write(sensor, VD55G1_REG_READOUT_CTRL,
 			 sensor->current_mode->bin_mode, &ret);
 
-	vd55g1_write_reg(sensor, VD55G1_REG_X_START(0), crop->left, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_X_WIDTH(0), crop->width, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_Y_START(0), crop->top, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_Y_HEIGHT(0), crop->height, &ret);
+	vd55g1_write(sensor, VD55G1_REG_X_START(0), crop->left, &ret);
+	vd55g1_write(sensor, VD55G1_REG_X_WIDTH(0), crop->width, &ret);
+	vd55g1_write(sensor, VD55G1_REG_Y_START(0), crop->top, &ret);
+	vd55g1_write(sensor, VD55G1_REG_Y_HEIGHT(0), crop->height, &ret);
 
-	vd55g1_write_reg(sensor, VD55G1_REG_X_START(1), crop->left, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_X_WIDTH(1), crop->width, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_Y_START(1), crop->top, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_Y_HEIGHT(1), crop->height, &ret);
+	vd55g1_write(sensor, VD55G1_REG_X_START(1), crop->left, &ret);
+	vd55g1_write(sensor, VD55G1_REG_X_WIDTH(1), crop->width, &ret);
+	vd55g1_write(sensor, VD55G1_REG_Y_START(1), crop->top, &ret);
+	vd55g1_write(sensor, VD55G1_REG_Y_HEIGHT(1), crop->height, &ret);
 
 	return ret;
 }
@@ -1072,7 +1091,7 @@ static int vd55g1_set_gpios(struct vd55g1_dev *sensor)
 				      gpios->in_sync);
 	if (ret)
 		return -EINVAL;
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_VT_CTRL, VD55G1_VT_SLAVE_GPIO,
+	ret = vd55g1_write(sensor, VD55G1_REG_VT_CTRL, VD55G1_VT_SLAVE_GPIO,
 			       NULL);
 
 	return ret;
@@ -1096,9 +1115,9 @@ static int vd55g1_stream_enable(struct vd55g1_dev *sensor)
 	if (ret)
 		goto err_rpm_put;
 
-	vd55g1_write_reg(sensor, VD55G1_REG_FORMAT_CTRL,
+	vd55g1_write(sensor, VD55G1_REG_FORMAT_CTRL,
 			 get_bpp_by_code(sensor->fmt.code), &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_OIF_IMG_CTRL,
+	vd55g1_write(sensor, VD55G1_REG_OIF_IMG_CTRL,
 			 get_data_type_by_code(sensor->fmt.code), &ret);
 	if (ret)
 		goto err_rpm_put;
@@ -1111,17 +1130,16 @@ static int vd55g1_stream_enable(struct vd55g1_dev *sensor)
 	if (ret)
 		goto err_rpm_put;
 
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_STBY,
+	ret = vd55g1_write(sensor, VD55G1_REG_STBY,
 			       VD55G1_STBY_START_STREAM, NULL);
 	if (ret)
 		goto err_rpm_put;
 
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, VD55G1_TIMEOUT_MS);
+	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, NULL);
 	if (ret)
 		goto err_rpm_put;
 
-	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_STREAMING,
-				VD55G1_TIMEOUT_MS);
+	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_STREAMING, NULL);
 	if (ret)
 		goto err_rpm_put;
 
@@ -1134,14 +1152,14 @@ err_rpm_put:
 
 static void vd55g1_save_exposure(struct vd55g1_dev *sensor)
 {
-	int ret;
+	u32 val;
 
-	ret = vd55g1_read_reg(sensor, VD55G1_REG_APPLIED_COARSE_EXPOSURE);
-	sensor->cold_start.expo = ret < 0 ? 0 : ret;
-	ret = vd55g1_read_reg(sensor, VD55G1_REG_APPLIED_DIGITAL_GAIN);
-	sensor->cold_start.digital_gain = ret < 0 ? 0 : ret;
-	ret = vd55g1_read_reg(sensor, VD55G1_REG_APPLIED_ANALOG_GAIN);
-	sensor->cold_start.analog_gain = ret < 0 ? 0 : ret;
+	vd55g1_read(sensor, VD55G1_REG_APPLIED_COARSE_EXPOSURE, &val, NULL);
+	sensor->cold_start.expo = val < 0 ? 0 : val;
+	vd55g1_read(sensor, VD55G1_REG_APPLIED_DIGITAL_GAIN, &val, NULL);
+	sensor->cold_start.digital_gain = val < 0 ? 0 : val;
+	vd55g1_read(sensor, VD55G1_REG_APPLIED_ANALOG_GAIN, &val, NULL);
+	sensor->cold_start.analog_gain = val < 0 ? 0 : val;
 }
 
 static int vd55g1_stream_disable(struct vd55g1_dev *sensor)
@@ -1152,17 +1170,16 @@ static int vd55g1_stream_disable(struct vd55g1_dev *sensor)
 	/* Keep exposure values for next cold start boot */
 	vd55g1_save_exposure(sensor);
 
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_STREAMING,
+	ret = vd55g1_write(sensor, VD55G1_REG_STREAMING,
 			       VD55G1_STREAMING_STOP_STREAM, NULL);
 	if (ret)
 		goto err_str_dis;
 
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STREAMING, 0, 2000);
+	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STREAMING, 0, NULL);
 	if (ret)
 		goto err_str_dis;
 
-	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY,
-				VD55G1_TIMEOUT_MS);
+	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY, NULL);
 
 err_str_dis:
 	if (ret)
@@ -1258,25 +1275,26 @@ error_ep:
 static int vd55g1_patch(struct vd55g1_dev *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	int patch, ret;
+	u32 patch;
+	int ret;
 
 	ret = vd55g1_write_array(sensor, VD55G1_REG_FWPATCH_START_ADDR,
-				 sizeof(patch_array), patch_array);
+				 sizeof(patch_array), patch_array, NULL);
 	if (ret)
 		return ret;
 
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_BOOT,
-			       VD55G1_BOOT_PATCH_SETUP, NULL);
+	ret = vd55g1_write(sensor, VD55G1_REG_BOOT, VD55G1_BOOT_PATCH_SETUP,
+			   NULL);
 	if (ret)
 		return ret;
 
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_BOOT, 0, VD55G1_TIMEOUT_MS);
+	ret = vd55g1_poll_reg(sensor, VD55G1_REG_BOOT, 0, NULL);
 	if (ret)
 		return ret;
 
-	patch = vd55g1_read_reg(sensor, VD55G1_REG_FWPATCH_REVISION);
-	if (patch < 0)
-		return patch;
+	vd55g1_read(sensor, VD55G1_REG_FWPATCH_REVISION, &patch, NULL);
+	if (ret)
+		return ret;
 
 	if (patch != (VD55G1_FWPATCH_REVISION_MAJOR << 8) +
 	    VD55G1_FWPATCH_REVISION_MINOR) {
@@ -1311,11 +1329,11 @@ static int vd55g1_configure(struct vd55g1_dev *sensor)
 		min_line_length = VD55G1_MIN_LINE_LENGTH_SUB;
 	sensor->line_length = max(min_line_length, req_line_length);
 
-	vd55g1_write_reg(sensor, VD55G1_REG_LINE_LENGTH, sensor->line_length,
+	vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH, sensor->line_length,
 			 &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_EXT_CLOCK, sensor->clk_freq, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_MIPI_DATA_RATE, mipi_bps, &ret);
+	vd55g1_write(sensor, VD55G1_REG_EXT_CLOCK, sensor->clk_freq, &ret);
+	vd55g1_write(sensor, VD55G1_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
+	vd55g1_write(sensor, VD55G1_REG_MIPI_DATA_RATE, mipi_bps, &ret);
 
 	return ret;
 }
@@ -1829,11 +1847,12 @@ free_ctrls:
 static int vd55g1_detect_cut_version(struct vd55g1_dev *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	int device_rev;
+	u32 device_rev;
+	int ret;
 
-	device_rev = vd55g1_read_reg(sensor, VD55G1_REG_REVISION);
-	if (device_rev < 0)
-		return device_rev;
+	ret = vd55g1_read(sensor, VD55G1_REG_REVISION, &device_rev, NULL);
+	if (ret)
+		return ret;
 
 	switch (device_rev) {
 	case VD55G1_REVISION_CUT_1:
@@ -1852,11 +1871,12 @@ static int vd55g1_detect_cut_version(struct vd55g1_dev *sensor)
 static int vd55g1_detect(struct vd55g1_dev *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	int ret, id = 0;
+	u32 id;
+	int ret;
 
-	id = vd55g1_read_reg(sensor, VD55G1_REG_MODEL_ID);
-	if (id < 0)
-		return id;
+	ret = vd55g1_read(sensor, VD55G1_REG_MODEL_ID, &id, NULL);
+	if (ret)
+		return ret;
 
 	if (id != VD55G1_MODEL_ID) {
 		dev_warn(&client->dev, "Unsupported sensor id %x", id);
@@ -1911,8 +1931,7 @@ static int vd55g1_power_on(struct device *dev)
 		goto disable_clock;
 	}
 
-	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY,
-				VD55G1_TIMEOUT_MS);
+	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY, NULL);
 	if (ret)
 		return ret;
 
@@ -2079,6 +2098,15 @@ static int vd55g1_probe(struct i2c_client *client)
 
 	sensor->reset_gpio = devm_gpiod_get_optional(dev, "reset",
 						     GPIOD_OUT_HIGH);
+
+#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+	sensor->regmap = devm_regmap_init_i2c(client, &vd55g1_regmap_config);
+#else
+	sensor->regmap = devm_cci_regmap_init_i2c(client, 16);
+#endif
+	if (IS_ERR(sensor->regmap))
+		return dev_err_probe(dev, PTR_ERR(sensor->regmap),
+				     "Failed to init regmap.");
 
 	ret = vd55g1_parse_dt_gpios(sensor);
 	if (ret) {
