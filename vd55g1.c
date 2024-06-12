@@ -2058,6 +2058,14 @@ static int vd55g1_parse_dt_gpios(struct vd55g1_dev *sensor)
 	return 0;
 }
 
+static void vd55g1_subdev_cleanup(struct vd55g1_dev *sensor)
+{
+	v4l2_async_unregister_subdev(&sensor->sd);
+	mutex_destroy(&sensor->lock);
+	media_entity_cleanup(&sensor->sd.entity);
+	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
+}
+
 static int vd55g1_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
@@ -2213,9 +2221,7 @@ static void vd55g1_remove(struct i2c_client *client)
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
 	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
 
-	v4l2_async_unregister_subdev(&sensor->sd);
-	mutex_destroy(&sensor->lock);
-	media_entity_cleanup(&sensor->sd.entity);
+	vd55g1_subdev_cleanup(sensor);
 
 	pm_runtime_disable(&client->dev);
 	if (!pm_runtime_status_suspended(&client->dev))
