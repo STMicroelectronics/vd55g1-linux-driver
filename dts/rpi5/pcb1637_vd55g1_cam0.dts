@@ -52,9 +52,9 @@
 				clocks = <&camera_clk_12M>;
 				clock-names = "xclk";
 
-				VCORE-supply = <&v1v2>;
-				VDDIO-supply = <&v1v8>;
-				VANA-supply = <&v2v8>;
+				vcore-supply = <&v1v2>;
+				vddio-supply = <&v1v8>;
+				vana-supply = <&v2v8>;
 
 				reset-gpios = <&gpio 5 1>;
 				st,leds = <2>;
