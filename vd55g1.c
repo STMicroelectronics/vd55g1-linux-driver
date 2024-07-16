@@ -352,7 +352,7 @@ struct vd55g1 {
 	u16 oif_ctrl;
 	int data_rate_in_mbps;
 	int pclk;
-	u16 line_length;
+	u16 line_length; //TODO remove
 	/* Lock to protect all members below */
 	struct mutex lock;
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -436,7 +436,6 @@ static u8 get_data_type_by_code(__u32 code)
 
 static s32 get_pixel_rate(struct vd55g1 *sensor)
 {
-	printk("%d %d\n", (u64)sensor->data_rate_in_mbps, get_bpp_by_code(sensor->active_fmt.code));
 	return div64_u64((u64)sensor->data_rate_in_mbps,
 			 get_bpp_by_code(sensor->active_fmt.code));
 }
@@ -1709,12 +1708,12 @@ static int vd55g1_init_controls(struct vd55g1 *sensor)
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
 	struct v4l2_ctrl *ctrl;
 	unsigned int patgen_size = ARRAY_SIZE(vd55g1_test_pattern_menu) - 1;
-	unsigned int hblank = sensor->line_length - sensor->active_fmt.width;
 	unsigned int expo_mode = sensor->expo_state == VD55G1_EXP_AUTO ?
 		V4L2_EXPOSURE_AUTO :  V4L2_EXPOSURE_MANUAL;
 	unsigned int vblank_default = sensor->vblank_min * 2 +
 		sensor->active_crop.height;
 	unsigned int vblank_max = 0xffff - sensor->active_crop.height * 2;
+	unsigned int hblank = VD55G1_MIN_LINE_LENGTH - sensor->active_fmt.width;
 	int ret;
 
 	TRACE("");
@@ -1823,7 +1822,6 @@ static int vd55g1_init_controls(struct vd55g1 *sensor)
 		goto free_ctrls;
 	}
 	TRACE("");
-	hblank = sensor->line_length - sensor->active_fmt.width;
 	sensor->hblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
 						hblank, hblank, 1, hblank);
 	if (sensor->hblank_ctrl)
