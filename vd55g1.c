@@ -908,19 +908,11 @@ static int vd55g1_apply_frame_format(struct vd55g1 *sensor)
 	return ret;
 }
 
-static int vd55g1_stream_enable(struct vd55g1 *sensor)
+//TODO you are here
+static int vd55g1_stream_on(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
-	int ret;
-
-	ret = pm_runtime_get_sync(&client->dev);
-	if (ret < 0) {
-		pm_runtime_put_autosuspend(&client->dev);
-		return ret;
-	}
-
-	/* pm_runtime_get_sync() can return 1 as a valid return code */
-	ret = 0;
+	int ret = 0;
 
 #if 0
 	ret = vd55g1_set_gpios(sensor);
@@ -939,20 +931,17 @@ static int vd55g1_stream_enable(struct vd55g1 *sensor)
 	if (ret)
 		goto err_rpm_put;
 
-	ret = vd55g1_write(sensor, VD55G1_REG_STBY,
-			       VD55G1_STBY_START_STREAM, NULL);
+	/* Apply settings from V4L2 ctrls */
+	ret = __v4l2_ctrl_handler_setup(&sensor->ctrl_handler);
 	if (ret)
-		goto err_rpm_put;
+		return ret;
 
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, NULL);
-	if (ret)
-		goto err_rpm_put;
+	/* start streaming */
+	vd55g1_write(sensor, VD55G1_REG_STBY, VD55G1_STBY_START_STREAM, &ret);
+	vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, &ret);
+	vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_STREAMING, &ret);
 
-	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_STREAMING, NULL);
-	if (ret)
-		goto err_rpm_put;
-
-	return 0;
+	return ret;
 
 err_rpm_put:
 	pm_runtime_put(&client->dev);
@@ -971,7 +960,7 @@ static void vd55g1_save_exposure(struct vd55g1 *sensor)
 	sensor->cold_start.again = val < 0 ? 0 : val;
 }
 
-static int vd55g1_stream_disable(struct vd55g1 *sensor)
+static int vd55g1_stream_off(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 	int ret;
@@ -1043,15 +1032,37 @@ static inline bool vd55g1_can_be_slave(struct vd55g1 *sensor)
 static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	int ret = 0;
 
-	mutex_lock(&sensor->lock);
+	if (enable) {
+#if KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE
+		ret = pm_runtime_get_sync(&client->dev);
+		if (ret < 0) {
+			pm_runtime_put_noidle(&client->dev);
+			goto unlock;
+		}
+#else
+		ret = pm_runtime_resume_and_get(&client->dev);
+		if (ret < 0)
+			goto unlock;
+#endif
+		ret = vd55g1_stream_on(sensor);
+		if (ret) {
+			dev_err(&client->dev, "Failed to start streaming\n");
+			pm_runtime_put_sync(&client->dev);
+		}
+	} else {
+		vd55g1_stream_off(sensor);
+		pm_runtime_mark_last_busy(&client->dev);
+		pm_runtime_put_autosuspend(&client->dev);
+	}
 
-	ret = enable ? vd55g1_stream_enable(sensor) :
-		       vd55g1_stream_disable(sensor);
 	if (!ret)
 		sensor->streaming = enable;
 
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
+unlock:
 	mutex_unlock(&sensor->lock);
 
 	if (!ret) {
@@ -1063,6 +1074,22 @@ static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
 		if (vd55g1_can_be_slave(sensor))
 			v4l2_ctrl_grab(sensor->slave_ctrl, enable);
 	}
+#else
+	if (!ret) {
+		sensor->streaming = enable;
+
+		/* These settings cannot change during streaming */
+		__v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
+		__v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
+		__v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
+		__v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
+		if (vd55g1_can_be_slave(sensor))
+			v4l2_ctrl_grab(sensor->slave_ctrl, enable);
+	}
+
+unlock:
+	mutex_unlock(&sensor->lock);
+#endif
 
 	return ret;
 }
@@ -1477,6 +1504,7 @@ static int vd55g1_init_controls(struct vd55g1 *sensor)
 					       0, 1, 1, 0);
 	sensor->hflip_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP,
 					       0, 1, 1, 0);
+#if 0
 	sensor->patgen_ctrl =
 		v4l2_ctrl_new_std_menu_items(hdl, ops, V4L2_CID_TEST_PATTERN,
 					     patgen_size, 0, 0,
@@ -1538,6 +1566,7 @@ static int vd55g1_init_controls(struct vd55g1 *sensor)
 		v4l2_ctrl_grab(sensor->slave_ctrl, true);
 	}
 	//TODO disable flash if not device tree possible
+#endif
 
 	sensor->sd.ctrl_handler = hdl;
 	return 0;
