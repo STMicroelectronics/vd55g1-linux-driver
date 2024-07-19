@@ -84,6 +84,7 @@
 #define VD55G1_REG_ORIENTATION				CCI_REG8(0x0302)
 #define VD55G1_REG_FORMAT_CTRL				CCI_REG8(0x030a)
 #define VD55G1_REG_OIF_CTRL				CCI_REG16_LE(0x030c)
+#define VD55G1_REG_ISL_ENABLE				CCI_REG16_LE(0x326)
 #define VD55G1_REG_OIF_IMG_CTRL				CCI_REG8(0x030f)
 #define VD55G1_REG_MIPI_DATA_RATE			CCI_REG32_LE(0x0224)
 #define VD55G1_REG_PATGEN_CTRL				CCI_REG16_LE(0x0304)
@@ -629,25 +630,6 @@ static int vd55g1_get_regulators(struct vd55g1 *sensor)
 				       sensor->supplies);
 }
 
-#if 0
-	u32 min_line_length;
-	/* Double data rate */
-	u32 req_line_length = (sensor->current_mode->crop.width *
-			       get_bpp_by_code(sensor->fmt.code) +
-			       VD55G1_MIPI_MARGIN) / VD55G1_PCLK_DIVISOR;
-	min_line_length = VD55G1_MIN_LINE_LENGTH;
-	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB)
-		min_line_length = VD55G1_MIN_LINE_LENGTH_SUB;
-	sensor->line_length = max(min_line_length, req_line_length);
-	vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH, sensor->line_length,
-			 &ret);
-	vd55g1_write(sensor, VD55G1_REG_MIPI_DATA_RATE, mipi_bps, &ret);
-	TRACE("writing stuff");
-	vd55g1_write(sensor, VD55G1_REG_EXT_CLOCK, sensor->xclk_freq, &ret);
-	vd55g1_write(sensor, VD55G1_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
-#endif
-
-
 static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -919,11 +901,31 @@ static int vd55g1_stream_on(struct vd55g1 *sensor)
 	if (ret)
 		goto err_rpm_put;
 #endif
+#if 0
+	u32 min_line_length;
+	/* Double data rate */
+	u32 req_line_length = (sensor->current_mode->crop.width *
+			       get_bpp_by_code(sensor->fmt.code) +
+			       VD55G1_MIPI_MARGIN) / VD55G1_PCLK_DIVISOR;
+	min_line_length = VD55G1_MIN_LINE_LENGTH;
+	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB)
+		min_line_length = VD55G1_MIN_LINE_LENGTH_SUB;
+	sensor->line_length = max(min_line_length, req_line_length);
+	vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH, sensor->line_length,
+			 &ret);
+	TRACE("writing stuff");
+#endif
+	/* configure clocks */
+	vd55g1_write(sensor, VD55G1_REG_EXT_CLOCK, sensor->xclk_freq, &ret);
 
+	/* configure ouput */
 	vd55g1_write(sensor, VD55G1_REG_FORMAT_CTRL,
 			 get_bpp_by_code(sensor->active_fmt.code), &ret);
 	vd55g1_write(sensor, VD55G1_REG_OIF_IMG_CTRL,
 			 get_data_type_by_code(sensor->active_fmt.code), &ret);
+	vd55g1_write(sensor, VD55G1_REG_MIPI_DATA_RATE, sensor->data_rate_in_mbps, &ret);
+	vd55g1_write(sensor, VD55G1_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
+	vd55g1_write(sensor, VD55G1_REG_ISL_ENABLE, 0, &ret);
 	if (ret)
 		goto err_rpm_put;
 
