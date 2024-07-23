@@ -806,33 +806,6 @@ static void vd55g1_update_img_pad_format(struct vd55g1 *sensor,
 	fmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
 }
 
-static int vd55g1_try_fmt_internal(struct v4l2_subdev *sd,
-				   struct v4l2_mbus_framefmt *fmt,
-				   const struct vd55g1_mode **new_mode)
-{
-	struct vd55g1 *sensor = to_vd55g1(sd);
-	const struct vd55g1_mode *mode = vd55g1_supported_modes;
-	unsigned int index;
-
-	for (index = 0; index < ARRAY_SIZE(vd55g1_mbus_codes); index++) {
-		if (vd55g1_mbus_codes[index].code == fmt->code)
-			break;
-	}
-	if (index == ARRAY_SIZE(vd55g1_mbus_codes))
-		index = 0;
-
-	mode = v4l2_find_nearest_size(vd55g1_supported_modes,
-				      ARRAY_SIZE(vd55g1_supported_modes), width,
-				      height, fmt->width, fmt->height);
-	if (new_mode)
-		*new_mode = mode;
-
-	vd55g1_update_img_pad_format(sensor, mode,
-			     vd55g1_mbus_codes[index].code, fmt);
-
-	return 0;
-}
-
 static int vd55g1_apply_hdr_mode(struct vd55g1 *sensor)
 {
 	int ret = 0;
@@ -881,10 +854,15 @@ static int vd55g1_apply_hdr_mode(struct vd55g1 *sensor)
 	return ret;
 }
 
-static int vd55g1_apply_frame_format(struct vd55g1 *sensor)
+static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 {
 	const struct v4l2_rect *crop = &sensor->active_crop;
 	int ret = 0;
+
+	vd55g1_write(sensor, VD55G1_REG_FORMAT_CTRL,
+			 get_bpp_by_code(sensor->active_fmt.code), &ret);
+	vd55g1_write(sensor, VD55G1_REG_OIF_IMG_CTRL,
+			 get_data_type_by_code(sensor->active_fmt.code), &ret);
 
 #if 0
 	//TODO
@@ -920,6 +898,9 @@ static int vd55g1_stream_on(struct vd55g1 *sensor)
 		goto err_rpm_put;
 #endif
 
+	//TODO move hblank calculation and store it in sensor, so you can update
+	//the hblank control with it
+
 	/* MIPI required time */
 	mipi_req_line_time = (sensor->active_crop.width *
 			       get_bpp_by_code(sensor->active_fmt.code) +
@@ -938,17 +919,13 @@ static int vd55g1_stream_on(struct vd55g1 *sensor)
 	vd55g1_write(sensor, VD55G1_REG_EXT_CLOCK, sensor->xclk_freq, &ret);
 
 	/* configure ouput */
-	vd55g1_write(sensor, VD55G1_REG_FORMAT_CTRL,
-			 get_bpp_by_code(sensor->active_fmt.code), &ret);
-	vd55g1_write(sensor, VD55G1_REG_OIF_IMG_CTRL,
-			 get_data_type_by_code(sensor->active_fmt.code), &ret);
 	vd55g1_write(sensor, VD55G1_REG_MIPI_DATA_RATE, sensor->data_rate_in_mbps, &ret);
 	vd55g1_write(sensor, VD55G1_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
 	vd55g1_write(sensor, VD55G1_REG_ISL_ENABLE, 0, &ret);
 	if (ret)
 		goto err_rpm_put;
 
-	ret = vd55g1_apply_frame_format(sensor);
+	ret = vd55g1_set_framefmt(sensor);
 	if (ret)
 		goto err_rpm_put;
 
@@ -1163,32 +1140,35 @@ static int vd55g1_enum_mbus_code(struct v4l2_subdev *sd,
 }
 
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-static int vd55g1_get_fmt(struct v4l2_subdev *sd,
+static int vd55g1_get_pad_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_pad_config *cfg,
-			  struct v4l2_subdev_format *format)
+			  struct v4l2_subdev_format *sd_fmt)
 #else
-static int vd55g1_get_fmt(struct v4l2_subdev *sd,
+static int vd55g1_get_pad_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_state *sd_state,
-			  struct v4l2_subdev_format *format)
+			  struct v4l2_subdev_format *sd_fmt)
 #endif
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
-	struct v4l2_mbus_framefmt *fmt;
+	struct v4l2_mbus_framefmt *pad_fmt;
 
 	mutex_lock(&sensor->lock);
 
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
+	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY)
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-		fmt = v4l2_subdev_get_try_format(&sensor->sd, cfg,
-						 format->pad);
+		pad_fmt = v4l2_subdev_get_try_format(&sensor->sd, cfg,
+						     sd_fmt->pad);
+#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
+		pad_fmt = v4l2_subdev_get_try_format(&sensor->sd, sd_state,
+						     sd_fmt->pad);
 #else
-		fmt = v4l2_subdev_get_try_format(&sensor->sd, sd_state,
-						 format->pad);
+		pad_fmt = v4l2_subdev_get_pad_format(&sensor->sd, sd_state,
+						     sd_fmt->pad);
 #endif
 	else
-		fmt = &sensor->active_fmt;
+		pad_fmt = &sensor->active_fmt;
 
-	format->format = *fmt;
+	sd_fmt->format = *pad_fmt;
 
 	mutex_unlock(&sensor->lock);
 
@@ -1196,42 +1176,50 @@ static int vd55g1_get_fmt(struct v4l2_subdev *sd,
 }
 
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-static int vd55g1_set_fmt(struct v4l2_subdev *sd,
+static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_pad_config *cfg,
-			  struct v4l2_subdev_format *format)
+			  struct v4l2_subdev_format *sd_fmt)
 #else
-static int vd55g1_set_fmt(struct v4l2_subdev *sd,
+static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 			  struct v4l2_subdev_state *sd_state,
-			  struct v4l2_subdev_format *format)
+			  struct v4l2_subdev_format *sd_fmt)
 #endif
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	const struct vd55g1_mode *new_mode;
-	struct v4l2_mbus_framefmt *fmt;
-	unsigned int expo_max, hblank;
-	int ret;
+	struct v4l2_mbus_framefmt *format;
+	int ret = 0;
+
+	if (sensor->streaming) {
+		return -EBUSY;
+	}
 
 	mutex_lock(&sensor->lock);
 
-	ret = vd55g1_try_fmt_internal(sd, &format->format, &new_mode);
-	if (ret)
-		goto out;
+	new_mode = v4l2_find_nearest_size(vd55g1_supported_modes,
+					  ARRAY_SIZE(vd55g1_supported_modes),
+					  width, height, sd_fmt->format.width,
+					  sd_fmt->format.height);
 
-#if 0
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
+	vd55g1_update_img_pad_format(sensor, new_mode, sd_fmt->format.code,
+				     &sd_fmt->format);
+
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-		fmt = v4l2_subdev_get_try_format(sd, cfg, 0);
+	format = v4l2_subdev_get_try_format(sd, cfg, sd_fmt->pad);
+#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
+	format = v4l2_subdev_get_try_format(sd, sd_state, sd_fmt->pad);
 #else
-		fmt = v4l2_subdev_get_try_format(sd, sd_state, 0);
+	format = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
 #endif
-		*fmt = format->format;
-	} else if (sensor->current_mode != new_mode ||
-		   sensor->fmt.code != format->format.code) {
-		fmt = &sensor->fmt;
-		*fmt = format->format;
+	*format = sd_fmt->format;
 
-		sensor->current_mode = new_mode;
+	//TODO binning and stuff
 
+	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
+		//TODO remove once active state is ready
+		sensor->active_fmt = sd_fmt->format;
+		//sensor->active_crop = pad_crop; //TODO binning
+#if 0
 		/* Reset vblank and framelength to default */
 		ret = vd55g1_update_vblank(sensor,
 					   VD55G1_FRAME_LENGTH_DEF -
@@ -1250,10 +1238,9 @@ static int vd55g1_set_fmt(struct v4l2_subdev *sd,
 		__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank, hblank, 1,
 					 hblank);
 		ret = __v4l2_ctrl_s_ctrl(sensor->hblank_ctrl, hblank);
-	}
 #endif
+	}
 
-out:
 	mutex_unlock(&sensor->lock);
 
 	return ret;
@@ -1275,9 +1262,9 @@ static int vd55g1_init_cfg(struct v4l2_subdev *sd,
 			     VD55G1_MEDIA_BUS_FMT_DEF, &fmt.format);
 
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-	return vd55g1_set_fmt(sd, cfg, &fmt);
+	return vd55g1_set_pad_fmt(sd, cfg, &fmt);
 #else
-	return vd55g1_set_fmt(sd, sd_state, &fmt);
+	return vd55g1_set_pad_fmt(sd, sd_state, &fmt);
 #endif
 }
 
@@ -1314,8 +1301,8 @@ static const struct v4l2_subdev_video_ops vd55g1_video_ops = {
 static const struct v4l2_subdev_pad_ops vd55g1_pad_ops = {
 	.init_cfg = vd55g1_init_cfg,
 	.enum_mbus_code = vd55g1_enum_mbus_code,
-	.get_fmt = vd55g1_get_fmt,
-	.set_fmt = vd55g1_set_fmt,
+	.get_fmt = vd55g1_get_pad_fmt,
+	.set_fmt = vd55g1_set_pad_fmt,
 	.get_selection = vd55g1_get_selection,
 	.enum_frame_size = vd55g1_enum_frame_size,
 };
