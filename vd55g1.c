@@ -207,12 +207,6 @@ static const char * const vd55g1_supply_name[] = {
 	"vana",
 };
 
-//TODO to device tree
-static const s64 link_freq[] = {
-	//1200000000ULL
-	400000000ULL
-};
-
 enum vd55g1_hdr_mode {
 	VD55G1_HDR_SUB,
 	VD55G1_NO_HDR,
@@ -383,6 +377,7 @@ struct vd55g1 {
 	bool streaming;
 	struct v4l2_mbus_framefmt active_fmt;
 	struct v4l2_rect active_crop;
+	u64 link_frequency;
 };
 
 static inline struct vd55g1 *to_vd55g1(struct v4l2_subdev *sd)
@@ -632,7 +627,7 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	//TODO pull from device tree
-	s64 mipi_freq = link_freq[0];
+	s64 mipi_freq = sensor->link_frequency;
 	u32 sys_clk, mipi_div, pixel_div;
 	int ret = 0;
 
@@ -647,7 +642,7 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 	if (mipi_freq < 250 * HZ_PER_MHZ ||
 	    mipi_freq > 1200 * HZ_PER_MHZ) {
 		dev_err(&client->dev,
-			"Only 250Mhz-1200Mhz mipi output range supported. Provided %lu MHz\n",
+			"Only 250Mhz-1200Mhz link frequency range supported. Provided %lu MHz\n",
 			mipi_freq / HZ_PER_MHZ);
 		return -EINVAL;
 	}
@@ -1754,6 +1749,19 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 	/* Handle polarities in sensor configuration */
 	sensor->oif_ctrl = (ep.bus.mipi_csi2.lane_polarities[0] << 3) |
 			   (ep.bus.mipi_csi2.lane_polarities[1] << 6);
+
+	/* Check the link frequency set in device tree */
+	if (!ep.nr_of_link_frequencies) {
+		dev_err(&client->dev, "link-frequency property not found in DT\n");
+		ret = -EINVAL;
+		goto done;
+	}
+	if (ep.nr_of_link_frequencies != 1) {
+		dev_err(&client->dev, "Multiple link frequencies not supported\n");
+		ret = -EINVAL;
+		goto done;
+	}
+	sensor->link_frequency = ep.link_frequencies[0];
 
 done:
 #if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
