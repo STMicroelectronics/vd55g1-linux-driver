@@ -265,57 +265,22 @@ static const struct vd55g1_mode vd55g1_supported_modes[] = {
 	{
 		.width = VD55G1_WIDTH,
 		.height = VD55G1_HEIGHT,
-		.bin_mode = VD55G1_BIN_MODE_NORMAL,
-		.crop = {
-			.left = 0,
-			.top = 0,
-			.width = VD55G1_WIDTH,
-			.height = VD55G1_HEIGHT,
-		},
 	},
 	{
 		.width = 800,
 		.height = VD55G1_HEIGHT,
-		.bin_mode = VD55G1_BIN_MODE_NORMAL,
-		.crop = {
-			.left = 2,
-			.top = 0,
-			.width = 800,
-			.height = VD55G1_HEIGHT,
-		},
 	},
 	{
 		.width = 800,
 		.height = 600,
-		.bin_mode = VD55G1_BIN_MODE_NORMAL,
-		.crop = {
-			.left = 2,
-			.top = 52,
-			.width = 800,
-			.height = 600,
-		},
 	},
 	{
 		.width = 640,
 		.height = 480,
-		.bin_mode = VD55G1_BIN_MODE_NORMAL,
-		.crop = {
-			.left = 82,
-			.top = 112,
-			.width = 640,
-			.height = 480,
-		},
 	},
 	{
 		.width = 320,
 		.height = 240,
-		.bin_mode = VD55G1_BIN_MODE_DIGITAL_X2,
-		.crop = {
-			.left = 82,
-			.top = 112,
-			.width = 640,
-			.height = 480,
-		},
 	},
 };
 
@@ -857,6 +822,7 @@ static int vd55g1_apply_hdr_mode(struct vd55g1 *sensor)
 static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 {
 	const struct v4l2_rect *crop = &sensor->active_crop;
+	enum vd55g1_bin_mode binning;
 	int ret = 0;
 
 	vd55g1_write(sensor, VD55G1_REG_FORMAT_CTRL,
@@ -864,11 +830,16 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 	vd55g1_write(sensor, VD55G1_REG_OIF_IMG_CTRL,
 			 get_data_type_by_code(sensor->active_fmt.code), &ret);
 
-#if 0
-	//TODO
-	vd55g1_write(sensor, VD55G1_REG_READOUT_CTRL,
-			 sensor->current_mode->bin_mode, &ret);
-#endif
+	switch (crop->width / sensor->active_fmt.width) {
+	case 1:
+	default:
+		binning = VD55G1_BIN_MODE_NORMAL;
+		break;
+	case 2:
+		binning = VD55G1_BIN_MODE_DIGITAL_X2;
+		break;
+	}
+	vd55g1_write(sensor, VD55G1_REG_READOUT_CTRL, binning, &ret);
 
 	vd55g1_write(sensor, VD55G1_REG_X_START(0), crop->left, &ret);
 	vd55g1_write(sensor, VD55G1_REG_X_WIDTH(0), crop->width, &ret);
@@ -1188,6 +1159,8 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	const struct vd55g1_mode *new_mode;
 	struct v4l2_mbus_framefmt *format;
+	struct v4l2_rect pad_crop;
+	unsigned int binning;
 	int ret = 0;
 
 	if (sensor->streaming) {
@@ -1213,12 +1186,22 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 #endif
 	*format = sd_fmt->format;
 
-	//TODO binning and stuff
+	/*
+	 * Use binning to maximize the crop rectangle size, and centre it in the
+	 * sensor.
+	 */
+	binning = min(VD55G1_WIDTH / sd_fmt->format.width,
+		      VD55G1_HEIGHT / sd_fmt->format.height);
+	binning = min(binning, 2U);
+	pad_crop.width = sd_fmt->format.width * binning;
+	pad_crop.height = sd_fmt->format.height * binning;
+	pad_crop.left = (VD55G1_WIDTH - pad_crop.width) / 2;
+	pad_crop.top = (VD55G1_HEIGHT - pad_crop.height) / 2;
 
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
 		//TODO remove once active state is ready
 		sensor->active_fmt = sd_fmt->format;
-		//sensor->active_crop = pad_crop; //TODO binning
+		sensor->active_crop = pad_crop;
 #if 0
 		/* Reset vblank and framelength to default */
 		ret = vd55g1_update_vblank(sensor,
