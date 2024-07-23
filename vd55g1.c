@@ -22,6 +22,7 @@
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-event.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
@@ -206,13 +207,10 @@ static const char * const vd55g1_supply_name[] = {
 	"vana",
 };
 
+//TODO to device tree
 static const s64 link_freq[] = {
-	/*
-	 * MIPI output freq is sensor datarate / 2, as it uses both rising edge
-	 * and falling edges to send data.
-	 * Sensor outputs at 1.2Ghz.
-	 */
-	600000000ULL
+	//1200000000ULL
+	400000000ULL
 };
 
 enum vd55g1_hdr_mode {
@@ -633,12 +631,11 @@ static int vd55g1_get_regulators(struct vd55g1 *sensor)
 static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	/* Double data rate */
-	u32 mipi_bps = link_freq[0] * 2;
+	//TODO pull from device tree
+	s64 mipi_freq = link_freq[0];
+	u32 sys_clk, mipi_div, pixel_div;
 	int ret = 0;
 
-	/* Double data rate */
-	/* External clock must be in [6Mhz-27Mhz] */
 	if (sensor->xclk_freq < 6 * HZ_PER_MHZ ||
 	    sensor->xclk_freq > 27 * HZ_PER_MHZ) {
 		dev_err(&client->dev,
@@ -647,10 +644,33 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 		return -EINVAL;
 	}
 
+	if (mipi_freq < 250 * HZ_PER_MHZ ||
+	    mipi_freq > 1200 * HZ_PER_MHZ) {
+		dev_err(&client->dev,
+			"Only 250Mhz-1200Mhz mipi output range supported. Provided %lu MHz\n",
+			mipi_freq / HZ_PER_MHZ);
+		return -EINVAL;
+	}
+
+	if (mipi_freq < 300 * HZ_PER_MHZ)
+		mipi_div = 4;
+	else if (mipi_freq < 600 * HZ_PER_MHZ)
+		mipi_div = 2;
+	else
+		mipi_div = 1;
+
+	sys_clk = mipi_freq * mipi_div;
+
+	if (sys_clk < 780 * HZ_PER_MHZ)
+		pixel_div = 5;
+	else if (sys_clk < 900 * HZ_PER_MHZ)
+		pixel_div = 6;
+	else
+		pixel_div = 8;
+
+	sensor->pixel_clock = sys_clk / pixel_div;
 	/* Frequency to data rate is 1:1 ratio for MIPI */
-	sensor->data_rate_in_mbps = mipi_bps;
-	/* Video timing ISP path (pixel clock)  requires 804/5 mhz = 160 mhz */
-	sensor->pixel_clock = mipi_bps / VD55G1_PCLK_DIVISOR;
+	sensor->data_rate_in_mbps = mipi_freq;
 
 	return ret;
 }
@@ -890,10 +910,13 @@ static int vd55g1_apply_frame_format(struct vd55g1 *sensor)
 	return ret;
 }
 
-//TODO you are here
 static int vd55g1_stream_on(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
+	u32 mipi_bps;
+	u32 mipi_req_line_time;
+	u32 mipi_req_line_length;
+	u32 min_line_length;
 	int ret = 0;
 
 #if 0
@@ -901,21 +924,22 @@ static int vd55g1_stream_on(struct vd55g1 *sensor)
 	if (ret)
 		goto err_rpm_put;
 #endif
-#if 0
-	u32 min_line_length;
-	/* Double data rate */
-	u32 req_line_length = (sensor->current_mode->crop.width *
-			       get_bpp_by_code(sensor->fmt.code) +
-			       VD55G1_MIPI_MARGIN) / VD55G1_PCLK_DIVISOR;
+
+	/* MIPI required time */
+	mipi_req_line_time = (sensor->active_crop.width *
+			       get_bpp_by_code(sensor->active_fmt.code) +
+			       VD55G1_MIPI_MARGIN) / (sensor->data_rate_in_mbps / MEGA);
+	mipi_req_line_length = mipi_req_line_time * sensor->pixel_clock / HZ_PER_MHZ;
+	/* Absolute time required for ADCs to convert pixels */
 	min_line_length = VD55G1_MIN_LINE_LENGTH;
+#if 0
 	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB)
 		min_line_length = VD55G1_MIN_LINE_LENGTH_SUB;
-	sensor->line_length = max(min_line_length, req_line_length);
-	vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH, sensor->line_length,
-			 &ret);
-	TRACE("writing stuff");
 #endif
-	/* configure clocks */
+	/* Respect both constraint */
+	vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH,
+		     max(min_line_length, mipi_req_line_length), &ret);
+
 	vd55g1_write(sensor, VD55G1_REG_EXT_CLOCK, sensor->xclk_freq, &ret);
 
 	/* configure ouput */
@@ -1284,6 +1308,8 @@ static int vd55g1_enum_frame_size(struct v4l2_subdev *sd,
 }
 
 static const struct v4l2_subdev_core_ops vd55g1_core_ops = {
+	.subscribe_event = v4l2_ctrl_subdev_subscribe_event,
+	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
 };
 
 static const struct v4l2_subdev_video_ops vd55g1_video_ops = {
