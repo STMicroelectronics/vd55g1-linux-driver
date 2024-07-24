@@ -179,7 +179,7 @@
 
 #include "vd55g1_patch.c"
 
-static const char * const vd55g1_test_pattern_menu[] = {
+static const char * const vd55g1_tp_menu[] = {
 	"Disabled",
 	"Dgrey",
 	"PN28",
@@ -205,6 +205,11 @@ static const char * const vd55g1_supply_name[] = {
 	"vcore",
 	"vddio",
 	"vana",
+};
+
+static u64 link_freq[] = {
+	/* Will be filled on device tree parse */
+	-1,
 };
 
 enum vd55g1_hdr_mode {
@@ -635,7 +640,7 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 	return ret;
 }
 
-static int vd55g1_apply_patgen(struct vd55g1 *sensor, u32 patgen_index)
+static int vd55g1_update_patgen(struct vd55g1 *sensor, u32 patgen_index)
 {
 	static const u8 index2val[] = {
 		0x0, 0x22, 0x28
@@ -1365,10 +1370,10 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 					   (sensor->vflip_ctrl->val << 1),
 				   NULL);
 		break;
-#if 0
 	case V4L2_CID_TEST_PATTERN:
-		ret = vd55g1_apply_patgen(sensor, ctrl->val);
+		ret = vd55g1_update_patgen(sensor, ctrl->val);
 		break;
+#if 0
 	case V4L2_CID_EXPOSURE_AUTO:
 		//ret = vd55g1_apply_exposure_auto(sensor, ctrl->val);
 		break;
@@ -1479,12 +1484,12 @@ static const struct v4l2_ctrl_config vd55g1_hdr_ctrl = {
 	.qmenu		= vd55g1_hdr_mode_menu,
 };
 
-static int vd55g1_init_controls(struct vd55g1 *sensor)
+static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 {
 	const struct v4l2_ctrl_ops *ops = &vd55g1_ctrl_ops;
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
 	struct v4l2_ctrl *ctrl;
-	unsigned int patgen_size = ARRAY_SIZE(vd55g1_test_pattern_menu) - 1;
+	unsigned int patgen_size = ARRAY_SIZE(vd55g1_tp_menu) - 1;
 	unsigned int vblank_max = 0xffff - sensor->active_crop.height * 2;
 	unsigned int hblank = VD55G1_MIN_LINE_LENGTH - sensor->active_fmt.width;
 	int ret;
@@ -1497,15 +1502,15 @@ static int vd55g1_init_controls(struct vd55g1 *sensor)
 					       0, 1, 1, 0);
 	sensor->hflip_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP,
 					       0, 1, 1, 0);
-#if 0
 	sensor->patgen_ctrl =
 		v4l2_ctrl_new_std_menu_items(hdl, ops, V4L2_CID_TEST_PATTERN,
-					     patgen_size, 0, 0,
-					     vd55g1_test_pattern_menu);
+					     ARRAY_SIZE(vd55g1_tp_menu) - 1, 0,
+					     0, vd55g1_tp_menu);
 	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
 				      ARRAY_SIZE(link_freq) - 1, 0, link_freq);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+#if 0
 	sensor->pixel_rate_ctrl = v4l2_ctrl_new_std(hdl, ops,
 						    V4L2_CID_PIXEL_RATE, 1,
 						    INT_MAX, 1,
@@ -1732,6 +1737,7 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 		goto done;
 	}
 	sensor->link_frequency = ep.link_frequencies[0];
+	link_freq[0] = ep.link_frequencies[0];
 
 done:
 #if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
@@ -1909,7 +1915,7 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	 * Initiliaze controls after update_img_pad_format to make sure default
 	 * values are set.
 	 */
-	ret = vd55g1_init_controls(sensor);
+	ret = vd55g1_init_ctrls(sensor);
 	if (ret) {
 		dev_err(&client->dev, "Controls initialization failed %d", ret);
 		goto err_media;
