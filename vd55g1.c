@@ -207,10 +207,8 @@ static const char * const vd55g1_supply_name[] = {
 	"vana",
 };
 
-static u64 link_freq[] = {
-	/* Will be filled on device tree parse */
-	-1,
-};
+/* Will be filled on device tree parse */
+static u64 link_freq[1];
 
 enum vd55g1_hdr_mode {
 	VD55G1_HDR_SUB,
@@ -347,7 +345,6 @@ struct vd55g1 {
 	bool streaming;
 	struct v4l2_mbus_framefmt active_fmt;
 	struct v4l2_rect active_crop;
-	u64 link_frequency;
 };
 
 static inline struct vd55g1 *to_vd55g1(struct v4l2_subdev *sd)
@@ -596,8 +593,7 @@ static int vd55g1_get_regulators(struct vd55g1 *sensor)
 static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	//TODO pull from device tree
-	s64 mipi_freq = sensor->link_frequency;
+	u64 mipi_freq = link_freq[0];
 	u32 sys_clk, mipi_div, pixel_div;
 	int ret = 0;
 
@@ -612,7 +608,7 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 	if (mipi_freq < 250 * HZ_PER_MHZ ||
 	    mipi_freq > 1200 * HZ_PER_MHZ) {
 		dev_err(&client->dev,
-			"Only 250Mhz-1200Mhz link frequency range supported. Provided %lu MHz\n",
+			"Only 250Mhz-1200Mhz link frequency range supported. Provided %llu MHz\n",
 			mipi_freq / HZ_PER_MHZ);
 		return -EINVAL;
 	}
@@ -1736,7 +1732,6 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 		ret = -EINVAL;
 		goto done;
 	}
-	sensor->link_frequency = ep.link_frequencies[0];
 	link_freq[0] = ep.link_frequencies[0];
 
 done:
