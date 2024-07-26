@@ -325,8 +325,8 @@ struct vd55g1 {
 	struct v4l2_ctrl *vblank_ctrl;
 	struct v4l2_ctrl *hblank_ctrl;
 	struct {
-		struct v4l2_ctrl *vflip_ctrl;
 		struct v4l2_ctrl *hflip_ctrl;
+		struct v4l2_ctrl *vflip_ctrl;
 	};
 	struct v4l2_ctrl *patgen_ctrl;
 	struct {
@@ -664,6 +664,59 @@ static int vd55g1_update_patgen(struct vd55g1 *sensor, u32 patgen_index)
 		return ret;
 
 	return vd55g1_write(sensor, VD55G1_REG_PATGEN_CTRL, reg, NULL);
+}
+
+static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
+{
+	enum vd55g1_expo_state expo_state = is_auto ? VD55G1_EXP_MODE_AUTO :
+						      VD55G1_EXP_MODE_MANUAL;
+	int ret = 0;
+
+	if (sensor->ae_ctrl->is_new)
+		vd55g1_write(sensor, VD55G1_REG_EXP_MODE(0), expo_state, &ret);
+
+#if 0
+	if (sensor->hdr == VD55G1_HDR_SUB) {
+		ret = vd55g1_write_reg(sensor, VD55G1_REG_EXP_MODE(1),
+				       VD55G1_EXP_BYPASS, NULL);
+		if (ret)
+			return ret;
+	}
+#endif
+
+#if 0
+	/* In Auto expo, set coldstart parameters */
+	if (is_auto && sensor->ae_ctrl->is_new) {
+		vd55g1_write(sensor, VD55G1_REG_AE_COLDSTART_COARSE_EXPOSURE,
+			     sensor->expo_ctrl->val, &ret);
+		vd55g1_write(sensor, VD55G1_REG_AE_COLDSTART_ANALOG_GAIN,
+			     sensor->again_ctrl->val, &ret);
+		vd55g1_write(sensor, VD55G1_REG_AE_COLDSTART_DIGITAL_GAIN,
+			     sensor->dgain_ctrl->val, &ret);
+	}
+
+	/* In Manual expo, set exposure, analog and digital gains */
+	if (!is_auto && sensor->expo_ctrl->is_new)
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_COARSE_EXPOSURE,
+			     sensor->expo_ctrl->val, &ret);
+
+	if (!is_auto && sensor->again_ctrl->is_new)
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
+			     sensor->again_ctrl->val, &ret);
+
+	if (!is_auto && sensor->dgain_ctrl->is_new) {
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN_CH0,
+			     sensor->dgain_ctrl->val, &ret);
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN_CH1,
+			     sensor->dgain_ctrl->val, &ret);
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN_CH2,
+			     sensor->dgain_ctrl->val, &ret);
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN_CH3,
+			     sensor->dgain_ctrl->val, &ret);
+	}
+#endif
+
+	return ret;
 }
 
 static int vd55g1_apply_flash(struct vd55g1 *sensor, int flash)
@@ -1037,8 +1090,8 @@ unlock:
 
 	if (!ret) {
 		/* These settings cannot change during streaming */
-		v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
 		v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
+		v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
 		v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
 		v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
 		if (vd55g1_can_be_slave(sensor))
@@ -1049,8 +1102,8 @@ unlock:
 		sensor->streaming = enable;
 
 		/* These settings cannot change during streaming */
-		__v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
 		__v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
+		__v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
 		__v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
 		__v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
 		if (vd55g1_can_be_slave(sensor))
@@ -1310,15 +1363,15 @@ static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 
 	TRACE("");
 	switch (ctrl->id) {
-	case V4L2_CID_PIXEL_RATE:
-		ret = __v4l2_ctrl_s_ctrl_int64(ctrl, get_pixel_rate(sensor));
-		break;
 	case V4L2_CID_TEMPERATURE:
 		TRACE("");
 		ret = vd55g1_get_temp(sensor, &temperature);
 		if (ret)
 			break;
 		ret = __v4l2_ctrl_s_ctrl(ctrl, temperature);
+		break;
+	case V4L2_CID_EXPOSURE_AUTO:
+		ret = 0; //TODO
 		break;
 	default:
 		ret = -EINVAL;
@@ -1334,6 +1387,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	unsigned int expo_max;
+	bool is_auto = false;
 	int ret;
 
 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
@@ -1349,7 +1403,18 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 					 VD55G1_EXPO_DEF);
 		break;
 #endif
-	//TODO ae cluster
+	case V4L2_CID_EXPOSURE_AUTO:
+		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
+#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
+		mutex_unlock(&sensor->lock);
+		v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
+		v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
+		mutex_lock(&sensor->lock);
+#else
+		__v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
+		__v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
+#endif
+		break;
 	default:
 		break;
 	}
@@ -1359,7 +1424,6 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		return 0;
 
 	switch (ctrl->id) {
-	case V4L2_CID_VFLIP:
 	case V4L2_CID_HFLIP:
 		ret = vd55g1_write(sensor, VD55G1_REG_ORIENTATION,
 				   sensor->hflip_ctrl->val |
@@ -1369,10 +1433,10 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_TEST_PATTERN:
 		ret = vd55g1_update_patgen(sensor, ctrl->val);
 		break;
-#if 0
 	case V4L2_CID_EXPOSURE_AUTO:
-		//ret = vd55g1_apply_exposure_auto(sensor, ctrl->val);
+		ret = vd55g1_update_expo_cluster(sensor, is_auto);
 		break;
+#if 0
 	case V4L2_CID_ANALOGUE_GAIN:
 		ret = vd55g1_write(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
 					ctrl->val, NULL);
@@ -1426,8 +1490,12 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 #endif
 	default:
 		ret = -EINVAL;
+		TRACE("huh");
 		break;
 	}
+
+	pm_runtime_mark_last_busy(&client->dev);
+	pm_runtime_put_autosuspend(&client->dev);
 
 	return ret;
 }
@@ -1494,32 +1562,16 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	/* we can use our own mutex for the ctrl lock */
 	hdl->lock = &sensor->lock;
 
-	sensor->vflip_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VFLIP,
-					       0, 1, 1, 0);
+	/* Flip cluster */
 	sensor->hflip_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP,
 					       0, 1, 1, 0);
-	sensor->patgen_ctrl =
-		v4l2_ctrl_new_std_menu_items(hdl, ops, V4L2_CID_TEST_PATTERN,
-					     ARRAY_SIZE(vd55g1_tp_menu) - 1, 0,
-					     0, vd55g1_tp_menu);
-	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
-				      ARRAY_SIZE(link_freq) - 1, 0, link_freq);
-	if (ctrl)
-		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
-#if 0
-	sensor->pixel_rate_ctrl = v4l2_ctrl_new_std(hdl, ops,
-						    V4L2_CID_PIXEL_RATE, 1,
-						    INT_MAX, 1,
-						    get_pixel_rate(sensor));
-	if (sensor->pixel_rate_ctrl)
-		sensor->pixel_rate_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	sensor->vflip_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VFLIP,
+					       0, 1, 1, 0);
+	v4l2_ctrl_cluster(2, &sensor->hflip_ctrl);
+
+	/* Exposition cluster */
 	sensor->ae_ctrl = v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_EXPOSURE_AUTO, 1, ~0x3,
 			       V4L2_EXPOSURE_AUTO);
-	sensor->ae_lock_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 1, 0, 0);
-	sensor->ae_bias_ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
-			       ARRAY_SIZE(vd55g1_ev_bias_menu) - 1,
-			       ARRAY_SIZE(vd55g1_ev_bias_menu) / 2,
-			       vd55g1_ev_bias_menu);
 	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN, 0, 24, 1,
 			  VD55G1_AGAIN_DEF);
 	sensor->dgain_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN, 256, 2048, 1,
@@ -1528,6 +1580,29 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 0,
 				  VD55G1_FRAME_LENGTH_DEF - VD55G1_EXPO_MAX_TERM,
 				  1, VD55G1_EXPO_DEF);
+	v4l2_ctrl_auto_cluster(4, &sensor->ae_ctrl, V4L2_EXPOSURE_MANUAL, true);
+
+	sensor->patgen_ctrl =
+		v4l2_ctrl_new_std_menu_items(hdl, ops, V4L2_CID_TEST_PATTERN,
+					     ARRAY_SIZE(vd55g1_tp_menu) - 1, 0,
+					     0, vd55g1_tp_menu);
+	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
+				      ARRAY_SIZE(link_freq) - 1, 0, link_freq);
+	if (ctrl)
+		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	sensor->pixel_rate_ctrl = v4l2_ctrl_new_std(hdl, ops,
+						    V4L2_CID_PIXEL_RATE, 1,
+						    INT_MAX, 1,
+						    get_pixel_rate(sensor));
+	if (sensor->pixel_rate_ctrl)
+		sensor->pixel_rate_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+#if 0
+	sensor->ae_lock_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 1, 0, 0);
+	sensor->ae_bias_ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
+			       ARRAY_SIZE(vd55g1_ev_bias_menu) - 1,
+			       ARRAY_SIZE(vd55g1_ev_bias_menu) / 2,
+			       vd55g1_ev_bias_menu);
+
 	sensor->hblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
 						hblank, hblank, 1, hblank);
 	if (sensor->hblank_ctrl)
@@ -1727,6 +1802,7 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 		ret = -EINVAL;
 		goto done;
 	}
+	//TODO support multiple link freq
 	if (ep.nr_of_link_frequencies != 1) {
 		dev_err(&client->dev, "Multiple link frequencies not supported\n");
 		ret = -EINVAL;
