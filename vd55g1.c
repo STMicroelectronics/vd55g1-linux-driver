@@ -684,18 +684,6 @@ static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
 	}
 #endif
 
-#if 0
-	/* In Auto expo, set coldstart parameters */
-	if (is_auto && sensor->ae_ctrl->is_new) {
-		vd55g1_write(sensor, VD55G1_REG_AE_COLDSTART_COARSE_EXPOSURE,
-			     sensor->expo_ctrl->val, &ret);
-		vd55g1_write(sensor, VD55G1_REG_AE_COLDSTART_ANALOG_GAIN,
-			     sensor->again_ctrl->val, &ret);
-		vd55g1_write(sensor, VD55G1_REG_AE_COLDSTART_DIGITAL_GAIN,
-			     sensor->dgain_ctrl->val, &ret);
-	}
-
-	/* In Manual expo, set exposure, analog and digital gains */
 	if (!is_auto && sensor->expo_ctrl->is_new)
 		vd55g1_write(sensor, VD55G1_REG_MANUAL_COARSE_EXPOSURE,
 			     sensor->expo_ctrl->val, &ret);
@@ -705,16 +693,9 @@ static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
 			     sensor->again_ctrl->val, &ret);
 
 	if (!is_auto && sensor->dgain_ctrl->is_new) {
-		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN_CH0,
-			     sensor->dgain_ctrl->val, &ret);
-		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN_CH1,
-			     sensor->dgain_ctrl->val, &ret);
-		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN_CH2,
-			     sensor->dgain_ctrl->val, &ret);
-		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN_CH3,
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
 			     sensor->dgain_ctrl->val, &ret);
 	}
-#endif
 
 	return ret;
 }
@@ -782,6 +763,55 @@ static int vd55g1_get_temp(struct vd55g1 *sensor, int *temp)
 		return vd55g1_get_temp_stream_enable(sensor, temp);
 	else
 		return vd55g1_get_temp_stream_disable(sensor, temp);
+}
+
+static int vd55g1_read_expo_cluster(struct vd55g1 *sensor, bool force_cur_val)
+{
+	int exposure = 0;
+	int again = 0;
+	int dgain = 0;
+	int ret = 0;
+
+	/*
+	 * When 'force_cur_val' is enabled, save the ctrl value in 'cur.val'
+	 * instead of the normal 'val', this is used during poweroff to cache
+	 * volatile ctrls and enable coldstart.
+	 */
+	vd55g1_read(sensor, VD55G1_REG_APPLIED_COARSE_EXPOSURE, &exposure,
+		    &ret);
+	vd55g1_read(sensor, VD55G1_REG_APPLIED_ANALOG_GAIN, &again, &ret);
+	vd55g1_read(sensor, VD55G1_REG_APPLIED_DIGITAL_GAIN, &dgain, &ret);
+	if (ret)
+		return ret;
+
+	//TODO __v4l2_ctrl_s_ctrl instead ?
+	TRACE("exposure: %d", exposure);
+	TRACE("again: %d", again);
+	TRACE("dgain: %d", dgain);
+
+	sensor->expo_ctrl->cur.val = exposure;
+	sensor->again_ctrl->cur.val = again;
+	sensor->dgain_ctrl->cur.val = dgain;
+#if 0
+	if (force_cur_val) {
+		sensor->expo_ctrl->cur.val = exposure;
+		sensor->again_ctrl->cur.val = again;
+		sensor->dgain_ctrl->cur.val = dgain;
+	} else {
+		sensor->expo_ctrl->val = exposure;
+		sensor->again_ctrl->val = again;
+		sensor->dgain_ctrl->val = dgain;
+	}
+	TRACE("");
+	ret |= __v4l2_ctrl_s_ctrl(sensor->expo_ctrl, exposure);
+	TRACE("");
+	ret |= __v4l2_ctrl_s_ctrl(sensor->again_ctrl, again);
+	ret |= __v4l2_ctrl_s_ctrl(sensor->dgain_ctrl, dgain);
+#endif
+
+	if (ret)
+		return -EINVAL; //TODO better
+	return ret;
 }
 
 static int vd55g1_update_exposure_target(struct vd55g1 *sensor, int index)
@@ -988,8 +1018,13 @@ static int vd55g1_stream_off(struct vd55g1 *sensor)
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 	int ret;
 
+	/* Retrieve Expo cluster to enable coldstart of AE */
+	ret = vd55g1_read_expo_cluster(sensor, true);
+
+#if 0
 	/* Keep exposure values for next cold start boot */
 	vd55g1_save_exposure(sensor);
+#endif
 
 	ret = vd55g1_write(sensor, VD55G1_REG_STREAMING,
 			       VD55G1_STREAMING_STOP_STREAM, NULL);
@@ -1178,6 +1213,7 @@ static int vd55g1_get_pad_fmt(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *pad_fmt;
 
 	mutex_lock(&sensor->lock);
+	TRACE("");
 
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY)
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
@@ -1222,6 +1258,7 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	}
 
 	mutex_lock(&sensor->lock);
+	TRACE("");
 
 	new_mode = v4l2_find_nearest_size(vd55g1_supported_modes,
 					  ARRAY_SIZE(vd55g1_supported_modes),
@@ -1358,25 +1395,31 @@ static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
 	struct vd55g1 *sensor = to_vd55g1(sd);
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	int temperature;
-	int ret;
+	int ret = 0;
 
-	TRACE("");
+	/* Interact with HW only when it is powered ON */
+	if (!pm_runtime_get_if_in_use(&client->dev))
+		return 0;
+
 	switch (ctrl->id) {
 	case V4L2_CID_TEMPERATURE:
-		TRACE("");
 		ret = vd55g1_get_temp(sensor, &temperature);
 		if (ret)
 			break;
 		ret = __v4l2_ctrl_s_ctrl(ctrl, temperature);
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
-		ret = 0; //TODO
+		ret = vd55g1_read_expo_cluster(sensor, false);
 		break;
 	default:
 		ret = -EINVAL;
 		break;
 	}
+
+	pm_runtime_mark_last_busy(&client->dev);
+	pm_runtime_put_autosuspend(&client->dev);
 
 	return ret;
 }
@@ -1410,6 +1453,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
 		v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
 		mutex_lock(&sensor->lock);
+		TRACE("");
 #else
 		__v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
 		__v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
@@ -1572,9 +1616,9 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	/* Exposition cluster */
 	sensor->ae_ctrl = v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_EXPOSURE_AUTO, 1, ~0x3,
 			       V4L2_EXPOSURE_AUTO);
-	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN, 0, 24, 1,
+	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN, 0, 0x1f, 1,
 			  VD55G1_AGAIN_DEF);
-	sensor->dgain_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN, 256, 2048, 1,
+	sensor->dgain_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN, 256, 0xffff, 1,
 			  VD55G1_DGAIN_DEF);
 	sensor->expo_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 0,
