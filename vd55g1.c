@@ -1493,13 +1493,14 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_3A_LOCK:
 		ret = vd55g1_lock_exposure(sensor, ctrl->val);
 		break;
-#if 0
-	case V4L2_CID_DARKCAL_PEDESTAL:
-		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(0),
-				 ctrl->val, &ret);
-		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(1),
-				 ctrl->val, &ret);
+	case V4L2_CID_AUTO_EXPOSURE_BIAS:
+		/*
+		 * We use auto exposure target percentage register to control
+		 * exposure bias for more precision.
+		 */
+		ret = vd55g1_update_exposure_target(sensor, ctrl->val);
 		break;
+#if 0
 	case V4L2_CID_VBLANK:
 		//ret = vd55g1_update_vblank(sensor, ctrl->val);
 		/* Max exposure changes with vblank */
@@ -1507,13 +1508,6 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_HBLANK:
 		/* Read only control, can only be activated by V4L2 framework */
 		ret = 0;
-		break;
-	case V4L2_CID_AUTO_EXPOSURE_BIAS:
-		/*
-		 * We use auto exposure target percentage register to control
-		 * exposure bias for more precision.
-		 */
-		ret = vd55g1_update_exposure_target(sensor, ctrl->val);
 		break;
 	case V4L2_CID_SLAVE:
 		//sensor->is_slave = ctrl->val;
@@ -1527,6 +1521,12 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		/* Max blanking changes with hdr mode */
 		vd55g1_update_hblank_ctrl(sensor);
 		ret = 0;
+		break;
+	case V4L2_CID_DARKCAL_PEDESTAL:
+		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(0),
+				 ctrl->val, &ret);
+		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(1),
+				 ctrl->val, &ret);
 		break;
 #endif
 	default:
@@ -1638,12 +1638,12 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	if (sensor->pixel_rate_ctrl)
 		sensor->pixel_rate_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	sensor->ae_lock_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 1, 0, 0);
-#if 0
 	sensor->ae_bias_ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
 			       ARRAY_SIZE(vd55g1_ev_bias_menu) - 1,
 			       ARRAY_SIZE(vd55g1_ev_bias_menu) / 2,
 			       vd55g1_ev_bias_menu);
 
+#if 0
 	sensor->hblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
 						hblank, hblank, 1, hblank);
 	if (sensor->hblank_ctrl)
