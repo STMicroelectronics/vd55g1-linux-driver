@@ -98,7 +98,7 @@
 #define VD55G1_REG_APPLIED_ANALOG_GAIN			CCI_REG16_LE(0x00ea)
 #define VD55G1_REG_APPLIED_DIGITAL_GAIN			CCI_REG16_LE(0x00ec)
 #define VD55G1_REG_AE_FORCE_COLDSTART			CCI_REG16_LE(0x0308)
-#define VD55G1_REG_AE_COLDSTART_EXP_TIME		CCI_REG32_LE(0x0374)
+#define VD55G1_REG_AE_COLDSTART_EXP_TIME		CCI_REG32_LE(0x0374) //TODO
 #define VD55G1_REG_READOUT_CTRL				CCI_REG8(0x052e)
 #define VD55G1_REG_DARKCAL_CTRL				CCI_REG8(0x032a)
 #define VD55G1_DARKCAL_BYPASS				0
@@ -700,6 +700,19 @@ static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
 	return ret;
 }
 
+static int vd55g1_lock_exposure(struct vd55g1 *sensor, u32 lock_val)
+{
+	bool ae_lock = lock_val & V4L2_LOCK_EXPOSURE;
+	enum vd55g1_expo_state expo_state = ae_lock ? VD55G1_EXP_MODE_FREEZE :
+						      VD55G1_EXP_MODE_AUTO;
+	int ret = 0;
+
+	if (sensor->ae_ctrl->val == V4L2_EXPOSURE_AUTO)
+		vd55g1_write(sensor, VD55G1_REG_EXP_MODE(0), expo_state, &ret);
+
+	return ret;
+}
+
 static int vd55g1_apply_flash(struct vd55g1 *sensor, int flash)
 {
 	struct vd55g1_gpios *gpios = &sensor->gpios;
@@ -783,11 +796,6 @@ static int vd55g1_read_expo_cluster(struct vd55g1 *sensor, bool force_cur_val)
 	vd55g1_read(sensor, VD55G1_REG_APPLIED_DIGITAL_GAIN, &dgain, &ret);
 	if (ret)
 		return ret;
-
-	//TODO __v4l2_ctrl_s_ctrl instead ?
-	TRACE("exposure: %d", exposure);
-	TRACE("again: %d", again);
-	TRACE("dgain: %d", dgain);
 
 	sensor->expo_ctrl->cur.val = exposure;
 	sensor->again_ctrl->cur.val = again;
@@ -1433,6 +1441,8 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	bool is_auto = false;
 	int ret;
 
+	vd55g1_read_expo_cluster(sensor, true);
+
 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
 		return 0;
 
@@ -1480,23 +1490,10 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_EXPOSURE_AUTO:
 		ret = vd55g1_update_expo_cluster(sensor, is_auto);
 		break;
-#if 0
-	case V4L2_CID_ANALOGUE_GAIN:
-		ret = vd55g1_write(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
-					ctrl->val, NULL);
-		break;
-	case V4L2_CID_DIGITAL_GAIN:
-		ret = vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
-					ctrl->val, NULL);
-		break;
-	case V4L2_CID_EXPOSURE:
-		ret = vd55g1_write(sensor,
-					VD55G1_REG_MANUAL_COARSE_EXPOSURE,
-					ctrl->val, NULL);
-		break;
 	case V4L2_CID_3A_LOCK:
-		//ret = vd55g1_lock_exposure(sensor, ctrl);
+		ret = vd55g1_lock_exposure(sensor, ctrl->val);
 		break;
+#if 0
 	case V4L2_CID_DARKCAL_PEDESTAL:
 		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(0),
 				 ctrl->val, &ret);
@@ -1615,11 +1612,11 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 
 	/* Exposition cluster */
 	sensor->ae_ctrl = v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_EXPOSURE_AUTO, 1, ~0x3,
-			       V4L2_EXPOSURE_AUTO);
-	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN, 0, 0x1f, 1,
-			  VD55G1_AGAIN_DEF);
+			       V4L2_EXPOSURE_AUTO); //TODO why < 728
+	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN, 0, 0x1c, 1,
+			  VD55G1_AGAIN_DEF); //TODO why can't < 19
 	sensor->dgain_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN, 256, 0xffff, 1,
-			  VD55G1_DGAIN_DEF);
+			  VD55G1_DGAIN_DEF); //TODO only integer part?
 	sensor->expo_ctrl =
 		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 0,
 				  VD55G1_FRAME_LENGTH_DEF - VD55G1_EXPO_MAX_TERM,
@@ -1640,8 +1637,8 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 						    get_pixel_rate(sensor));
 	if (sensor->pixel_rate_ctrl)
 		sensor->pixel_rate_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
-#if 0
 	sensor->ae_lock_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 1, 0, 0);
+#if 0
 	sensor->ae_bias_ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
 			       ARRAY_SIZE(vd55g1_ev_bias_menu) - 1,
 			       ARRAY_SIZE(vd55g1_ev_bias_menu) / 2,
