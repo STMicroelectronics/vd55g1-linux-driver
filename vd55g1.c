@@ -822,6 +822,23 @@ static int vd55g1_read_expo_cluster(struct vd55g1 *sensor, bool force_cur_val)
 	return ret;
 }
 
+static int vd55g1_update_framelength(struct vd55g1 *sensor, unsigned int frame_length)
+{
+#if 0
+	int ret = 0;
+
+	if (sensor->hdr == VD55G1_HDR_SUB) {
+		vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(1),
+				 sensor->frame_length, &ret);
+		if (ret)
+			return ret;
+	}
+#endif
+
+	return vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(0),
+			    frame_length, NULL);
+}
+
 static int vd55g1_update_exposure_target(struct vd55g1 *sensor, int index)
 {
 	/*
@@ -1437,6 +1454,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	unsigned int frame_length = 0;
 	unsigned int expo_max;
 	bool is_auto = false;
 	int ret;
@@ -1448,14 +1466,14 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 
 	/* Update controls state, range, etc. whatever the state of the HW */
 	switch (ctrl->id) {
-#if 0
 	case V4L2_CID_VBLANK:
 		frame_length = sensor->active_crop.height + ctrl->val;
+#if 0
 		expo_max = frame_length - VD55G1_EXPO_MAX_TERM;
 		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
 					 VD55G1_EXPO_DEF);
-		break;
 #endif
+		break;
 	case V4L2_CID_EXPOSURE_AUTO:
 		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
 #if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
@@ -1500,15 +1518,10 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		 */
 		ret = vd55g1_update_exposure_target(sensor, ctrl->val);
 		break;
-#if 0
 	case V4L2_CID_VBLANK:
-		//ret = vd55g1_update_vblank(sensor, ctrl->val);
-		/* Max exposure changes with vblank */
+		ret = vd55g1_update_framelength(sensor, frame_length);
 		break;
-	case V4L2_CID_HBLANK:
-		/* Read only control, can only be activated by V4L2 framework */
-		ret = 0;
-		break;
+#if 0
 	case V4L2_CID_SLAVE:
 		//sensor->is_slave = ctrl->val;
 		ret = 0;
@@ -1614,7 +1627,7 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	sensor->ae_ctrl = v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_EXPOSURE_AUTO, 1, ~0x3,
 			       V4L2_EXPOSURE_AUTO); //TODO why < 728
 	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN, 0, 0x1c, 1,
-			  VD55G1_AGAIN_DEF); //TODO why can't < 19
+			  VD55G1_AGAIN_DEF);
 	sensor->dgain_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN, 256, 0xffff, 1,
 			  VD55G1_DGAIN_DEF); //TODO only integer part?
 	sensor->expo_ctrl =
@@ -1643,14 +1656,14 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 			       ARRAY_SIZE(vd55g1_ev_bias_menu) / 2,
 			       vd55g1_ev_bias_menu);
 
+	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
+						VD55G1_VBLANK_DEF, vblank_max,
+						1, VD55G1_VBLANK_DEF);
 #if 0
 	sensor->hblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
 						hblank, hblank, 1, hblank);
 	if (sensor->hblank_ctrl)
 		sensor->hblank_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
-	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
-						VD55G1_VBLANK_DEF, vblank_max,
-						1, VD55G1_VBLANK_DEF);
 	ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_temp_ctrl, NULL);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE |
