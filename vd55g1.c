@@ -1656,20 +1656,19 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 			       ARRAY_SIZE(vd55g1_ev_bias_menu) / 2,
 			       vd55g1_ev_bias_menu);
 
-	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
-						VD55G1_VBLANK_DEF, vblank_max,
-						1, VD55G1_VBLANK_DEF);
-#if 0
 	sensor->hblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
 						hblank, hblank, 1, hblank);
 	if (sensor->hblank_ctrl)
 		sensor->hblank_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
+						VD55G1_VBLANK_DEF, vblank_max,
+						1, VD55G1_VBLANK_DEF);
+#if 0
 	ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_temp_ctrl, NULL);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE |
 			       V4L2_CTRL_FLAG_READ_ONLY;
 	sensor->darkcal_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_darkcal_pedestal_ctrl, NULL);
-	//TODO maybe remove it entirely just like fox ?
 	sensor->slave_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_slave_ctrl,
 						  NULL);
 	sensor->led_ctrl = v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_FLASH_LED_MODE,
