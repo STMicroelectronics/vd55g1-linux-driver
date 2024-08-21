@@ -1026,18 +1026,6 @@ err_rpm_put:
 	return ret;
 }
 
-static void vd55g1_save_exposure(struct vd55g1 *sensor)
-{
-	u32 val;
-
-	vd55g1_read(sensor, VD55G1_REG_APPLIED_COARSE_EXPOSURE, &val, NULL);
-	sensor->cold_start.expo = val < 0 ? 0 : val;
-	vd55g1_read(sensor, VD55G1_REG_APPLIED_DIGITAL_GAIN, &val, NULL);
-	sensor->cold_start.dgain = val < 0 ? 0 : val;
-	vd55g1_read(sensor, VD55G1_REG_APPLIED_ANALOG_GAIN, &val, NULL);
-	sensor->cold_start.again = val < 0 ? 0 : val;
-}
-
 static int vd55g1_stream_off(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
@@ -1045,11 +1033,6 @@ static int vd55g1_stream_off(struct vd55g1 *sensor)
 
 	/* Retrieve Expo cluster to enable coldstart of AE */
 	ret = vd55g1_read_expo_cluster(sensor, true);
-
-#if 0
-	/* Keep exposure values for next cold start boot */
-	vd55g1_save_exposure(sensor);
-#endif
 
 	ret = vd55g1_write(sensor, VD55G1_REG_STREAMING,
 			       VD55G1_STREAMING_STOP_STREAM, NULL);
