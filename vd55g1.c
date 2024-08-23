@@ -1141,8 +1141,10 @@ unlock:
 		__v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
 		__v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
 		__v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
-		if (sensor->ext_vt_sync)
+		if (sensor->ext_vt_sync) {
+			TRACE("");
 			__v4l2_ctrl_grab(sensor->slave_ctrl, enable);
+		}
 	}
 
 unlock:
@@ -1598,7 +1600,7 @@ static const struct v4l2_ctrl_config vd55g1_slave_ctrl = {
 	.min		= 0,
 	.max		= 1,
 	.step		= 1,
-	.def		= 0,
+	.def		= 1,
 };
 
 static const struct v4l2_ctrl_config vd55g1_hdr_ctrl = {
@@ -1673,7 +1675,8 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
 						VD55G1_VBLANK_DEF, vblank_max,
 						1, VD55G1_VBLANK_DEF);
-	sensor->slave_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_slave_ctrl,
+	if (sensor->ext_vt_sync)
+		sensor->slave_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_slave_ctrl,
 						  NULL);
 #if 0
 	ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_temp_ctrl, NULL);
