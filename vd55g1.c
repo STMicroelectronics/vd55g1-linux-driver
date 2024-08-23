@@ -110,7 +110,7 @@
 #define VD55G1_DUSTER_RING_ENABLE			BIT(4)
 #define VD55G1_REG_AE_TARGET_PERCENTAGE			CCI_REG8(0x0486)
 #define VD55G1_REG_VT_CTRL				CCI_REG8(0x0309)
-#define VD55G1_VT_SLAVE_GPIO				1
+#define VD55G1_VT_SLAVE_GPIO				0
 #define VD55G1_REG_ERROR_CODE				CCI_REG16_LE(0x0010)
 #define VD55G1_REG_NEXT_CTX				CCI_REG16_LE(0x03e4)
 #define VD55G1_REG_EXPOSURE_USE_CASES			CCI_REG8(0x0312)
@@ -172,7 +172,7 @@
 
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
-#define V4L2_CID_SLAVE				(V4L2_CID_USER_BASE | 0x1022)
+#define V4L2_CID_SLAVE_MODE				(V4L2_CID_USER_BASE | 0x1022)
 #if KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE
 #define V4L2_CID_HDR_SENSOR_MODE		(V4L2_CID_USER_BASE | 0x1004)
 #endif
@@ -221,7 +221,7 @@ enum vd55g1_bin_mode {
 	VD55G1_BIN_MODE_DIGITAL_X4,
 };
 
-enum vd55g1_gpio_modes {
+enum vd55g1_gpio_mode {
 	VD55G1_GPIO_MODE_DISABLED,
 	VD55G1_GPIO_MODE_STROBE,
 	VD55G1_GPIO_MODE_VSYNC_OUT_0,
@@ -295,12 +295,6 @@ enum vd55g1_expo_state {
 	VD55G1_EXP_BYPASS,
 };
 
-struct vd55g1_gpios {
-	u32 leds[VD55G1_NB_GPIOS];
-	u32 out_sync[VD55G1_NB_GPIOS];
-	u32 in_sync;
-};
-
 struct vd55g1 {
 	struct i2c_client *i2c_client;
 	struct v4l2_subdev sd;
@@ -311,6 +305,8 @@ struct vd55g1 {
 	struct regmap *regmap;
 	u32 xclk_freq;
 	u16 oif_ctrl;
+	enum vd55g1_gpio_mode gpios[VD55G1_NB_GPIOS];
+	bool ext_vt_sync;
 	int data_rate_in_mbps;
 	u32 pixel_clock;
 	struct {
@@ -341,7 +337,6 @@ struct vd55g1 {
 	struct v4l2_ctrl *slave_ctrl;
 	struct v4l2_ctrl *led_ctrl;
 	struct v4l2_ctrl *hdr_ctrl;
-	struct vd55g1_gpios gpios;
 	bool streaming;
 	struct v4l2_mbus_framefmt active_fmt;
 	struct v4l2_rect active_crop;
@@ -562,7 +557,7 @@ static int vd55g1_update_gpio_mode(struct vd55g1 *sensor, u32 mode,
 }
 
 static int vd55g1_set_gpios_array(struct vd55g1 *sensor, u32 *array,
-				  int size, enum vd55g1_gpio_modes mode)
+				  int size, enum vd55g1_gpio_mode mode)
 {
 	unsigned int i;
 	int ret;
@@ -713,17 +708,19 @@ static int vd55g1_lock_exposure(struct vd55g1 *sensor, u32 lock_val)
 	return ret;
 }
 
+#if 0
 static int vd55g1_apply_flash(struct vd55g1 *sensor, int flash)
 {
 	struct vd55g1_gpios *gpios = &sensor->gpios;
 
-	enum vd55g1_gpio_modes mode = flash ?
+	enum vd55g1_gpio_mode mode = flash ?
 				      VD55G1_GPIO_MODE_STROBE :
 				      VD55G1_GPIO_MODE_DISABLED;
 
 	return vd55g1_set_gpios_array(sensor, gpios->leds,
 				      ARRAY_SIZE(gpios->leds), mode);
 }
+#endif
 
 static int vd55g1_apply_darkcal_pedestal(struct vd55g1 *sensor)
 {
@@ -1090,11 +1087,6 @@ static int vd55g1_patch(struct vd55g1 *sensor)
 	return 0;
 }
 
-static inline bool vd55g1_can_be_slave(struct vd55g1 *sensor)
-{
-	return sensor->gpios.in_sync != ~0;
-}
-
 static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
@@ -1137,7 +1129,7 @@ unlock:
 		v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
 		v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
 		v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
-		if (vd55g1_can_be_slave(sensor))
+		if (sensor->ext_vt_sync)
 			v4l2_ctrl_grab(sensor->slave_ctrl, enable);
 	}
 #else
@@ -1149,8 +1141,8 @@ unlock:
 		__v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
 		__v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
 		__v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
-		if (vd55g1_can_be_slave(sensor))
-			v4l2_ctrl_grab(sensor->slave_ctrl, enable);
+		if (sensor->ext_vt_sync)
+			__v4l2_ctrl_grab(sensor->slave_ctrl, enable);
 	}
 
 unlock:
@@ -1399,6 +1391,41 @@ static const struct media_entity_operations vd55g1_subdev_entity_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };
 
+//TODO rename update_gpio
+static int vd55g1_write_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
+{
+	unsigned long io;
+	u32 gpio_val;
+	int ret = 0;
+
+	//TODO index2val
+	for_each_set_bit(io, &gpio_mask, VD55G1_NB_GPIOS) {
+		gpio_val = sensor->gpios[io];
+
+		if (gpio_val == VD55G1_GPIO_MODE_VTSLAVE &&
+		    !sensor->slave_ctrl->val)
+			gpio_val = VD55G1_GPIO_MODE_DISABLED;
+
+		if (gpio_val == VD55G1_GPIO_MODE_STROBE &&
+		    sensor->led_ctrl->val == V4L2_FLASH_LED_MODE_NONE)
+			gpio_val = VD55G1_GPIO_MODE_DISABLED;
+#if 0
+			if (sensor->hdr == VD55G1_HDR_SUB) {
+				/* Make its context 1 counterpart strobe too */
+				ret = vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(1) + gpio,
+						       index2val[mode], NULL);
+				if (ret)
+					return ret;
+			}
+#endif
+
+		vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(0) + io, gpio_val,
+			     &ret);
+	}
+
+	return ret;
+}
+
 static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
@@ -1504,11 +1531,11 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_VBLANK:
 		ret = vd55g1_update_framelength(sensor, frame_length);
 		break;
-#if 0
-	case V4L2_CID_SLAVE:
-		//sensor->is_slave = ctrl->val;
-		ret = 0;
+	case V4L2_CID_SLAVE_MODE:
+		ret = vd55g1_write_gpios(sensor, VD55G1_VT_SLAVE_GPIO);
+		ret = vd55g1_write(sensor, VD55G1_REG_VT_CTRL, ctrl->val, &ret);
 		break;
+#if 0
 	case V4L2_CID_FLASH_LED_MODE:
 		ret = vd55g1_apply_flash(sensor, ctrl->val);
 		break;
@@ -1565,13 +1592,13 @@ static const struct v4l2_ctrl_config vd55g1_darkcal_pedestal_ctrl = {
 
 static const struct v4l2_ctrl_config vd55g1_slave_ctrl = {
 	.ops		= &vd55g1_ctrl_ops,
-	.id		= V4L2_CID_SLAVE,
+	.id		= V4L2_CID_SLAVE_MODE,
 	.name		= "VT Slave Mode",
 	.type		= V4L2_CTRL_TYPE_BOOLEAN,
 	.min		= 0,
 	.max		= 1,
 	.step		= 1,
-	.def		= 1,
+	.def		= 0,
 };
 
 static const struct v4l2_ctrl_config vd55g1_hdr_ctrl = {
@@ -1646,14 +1673,14 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
 						VD55G1_VBLANK_DEF, vblank_max,
 						1, VD55G1_VBLANK_DEF);
+	sensor->slave_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_slave_ctrl,
+						  NULL);
 #if 0
 	ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_temp_ctrl, NULL);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE |
 			       V4L2_CTRL_FLAG_READ_ONLY;
 	sensor->darkcal_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_darkcal_pedestal_ctrl, NULL);
-	sensor->slave_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_slave_ctrl,
-						  NULL);
 	sensor->led_ctrl = v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_FLASH_LED_MODE,
 			       V4L2_FLASH_LED_MODE_FLASH, ~0x7,
 			       V4L2_FLASH_LED_MODE_NONE);
@@ -1865,14 +1892,20 @@ static int vd55g1_parse_dt_gpios_array(struct vd55g1 *sensor,
 
 	*nb = of_property_read_variable_u32_array(np, prop_name, array, 0,
 						  VD55G1_NB_GPIOS);
-	*nb = max(0, *nb);
-	if (*nb > 0) {
-		for (i = 0; i < *nb;  i++) {
-			if (array[i] >= VD55G1_NB_GPIOS) {
-				dev_err(&client->dev, "invalid GPIO %d for leds\n",
-					array[i]);
-				return -EINVAL;
-			}
+	if (*nb == -EINVAL) {
+		/* Property not found */
+		*nb = 0;
+		return 0;
+	} else if (*nb < 0) {
+		dev_err(&client->dev, "Failed to read %s prop\n", prop_name);
+		return *nb;
+	}
+
+	for (i = 0; i < *nb;  i++) {
+		if (array[i] >= VD55G1_NB_GPIOS) {
+			dev_err(&client->dev, "invalid GPIO number %d\n",
+				array[i]);
+			return -EINVAL;
 		}
 	}
 
@@ -1883,68 +1916,61 @@ static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	struct device_node *np = client->dev.of_node;
-	struct vd55g1_gpios *gpios = &sensor->gpios;
-	int nb_gpios_leds, nb_gpios_out;
+	u32 led_gpios[VD55G1_NB_GPIOS];
+	int nb_gpios_leds;
+	u32 out_sync_gpios[VD55G1_NB_GPIOS];
+	int nb_gpios_out;
+	u32 in_sync_gpio;
+	unsigned int i;
 	int ret;
-	unsigned int i, j;
 
-	memset(gpios->leds, ~0,
-	       ARRAY_SIZE(gpios->leds) * sizeof(gpios->leds[0]));
-	memset(gpios->out_sync, ~0,
-	       ARRAY_SIZE(gpios->out_sync) * sizeof(gpios->out_sync[0]));
-	gpios->in_sync = ~0;
+	/* Initialize GPIOs to default */
+	for (i = 0; i < VD55G1_NB_GPIOS; i++)
+		sensor->gpios[i] = VD55G1_GPIO_MODE_DISABLED;
 
-	ret = vd55g1_parse_dt_gpios_array(sensor, "st,leds",
-					  (u32 *)&gpios->leds,
+	/* Take into account optional 'st,leds' output for GPIOs */
+	ret = vd55g1_parse_dt_gpios_array(sensor, "st,leds", led_gpios,
 					  &nb_gpios_leds);
 	if (ret)
 		return ret;
 
-	ret = vd55g1_parse_dt_gpios_array(sensor, "st,out-sync",
-					  (u32 *)&gpios->out_sync,
+	for (i = 0; i < nb_gpios_leds; i++)
+		sensor->gpios[led_gpios[i]] = VD55G1_GPIO_MODE_STROBE;
+
+	/* Take into account optional 'st,out-sync' output for GPIOs */
+	ret = vd55g1_parse_dt_gpios_array(sensor, "st,out-sync", out_sync_gpios,
 					  &nb_gpios_out);
 	if (ret)
 		return ret;
 
-	ret = of_property_read_u32(np, "st,in-sync", &gpios->in_sync);
-	if (ret == 0) {
-		if (gpios->in_sync != 0) {
-			dev_err(&client->dev, "input sync gpio must be 0 if present, found %d\n",
-				gpios->in_sync);
+	for (i = 0; i < nb_gpios_out; i++) {
+		if (sensor->gpios[out_sync_gpios[i]] != VD55G1_GPIO_MODE_DISABLED) {
+			dev_err(&client->dev, "Multiple use of GPIO %d\n",
+				out_sync_gpios[i]);
 			return -EINVAL;
 		}
-
-		/* Check no other gpios array use gpio 0 */
-		for (i = 0; i < nb_gpios_leds;  i++) {
-			if (gpios->leds[i] == gpios->in_sync) {
-				dev_err(&client->dev, "in-sync GPIO %d is used by another led gpio\n",
-					gpios->in_sync);
-				return -EINVAL;
-			}
-		}
-		for (i = 0; i < nb_gpios_out;  i++) {
-			if (gpios->out_sync[i] == gpios->in_sync) {
-				dev_err(&client->dev, "in-sync GPIO %d is used by another out-sync gpio\n",
-					gpios->in_sync);
-				return -EINVAL;
-			}
-		}
-
-		dev_dbg(&client->dev, "GPIO %d in input slave mode\n",
-			gpios->in_sync);
-
-		//sensor->is_slave = true;
+		sensor->gpios[out_sync_gpios[i]] = VD55G1_GPIO_MODE_VSYNC_OUT_0;
 	}
 
-	/* Check mutual exclusivity between leds and out_sync */
-	for (i = 0; i < nb_gpios_leds;  i++) {
-		for (j = 0; j < nb_gpios_out;  j++) {
-			if (gpios->leds[i] == gpios->out_sync[j]) {
-				dev_err(&client->dev, "GPIO %d used in both leds and out-sync\n",
-					gpios->leds[i]);
-				return -EINVAL;
-			}
+	/* Take into account optional 'st,in-sync' input for GPIO0 */
+	ret = of_property_read_u32(np, "st,in-sync", &in_sync_gpio);
+	if (ret < 0 && ret != -EINVAL) {
+		dev_err(&client->dev, "Failed to read st,in-sync prop\n");
+		return ret;
+	} else if (ret == -EINVAL) {
+		sensor->ext_vt_sync = false;
+	} else {
+		if (in_sync_gpio != VD55G1_VT_SLAVE_GPIO) {
+			dev_err(&client->dev, "in-sync GPIO must be gpio0\n");
+			return -EINVAL;
 		}
+		if (sensor->gpios[in_sync_gpio] != VD55G1_GPIO_MODE_DISABLED) {
+			dev_err(&client->dev, "Multiple use of GPIO %d\n",
+				in_sync_gpio);
+			return -EINVAL;
+		}
+		sensor->gpios[in_sync_gpio] = VD55G1_GPIO_MODE_VTSLAVE;
+		sensor->ext_vt_sync = true;
 	}
 
 	return 0;
