@@ -1536,6 +1536,12 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd55g1_write_gpios(sensor, VD55G1_VTSLAVE_GPIO);
 		ret = vd55g1_write(sensor, VD55G1_REG_VT_CTRL, ctrl->val, &ret);
 		break;
+	case V4L2_CID_DARKCAL_PEDESTAL:
+		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(0),
+				 ctrl->val, &ret);
+		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(1),
+				 ctrl->val, &ret);
+		break;
 #if 0
 	case V4L2_CID_FLASH_LED_MODE:
 		ret = vd55g1_apply_flash(sensor, ctrl->val);
@@ -1546,16 +1552,9 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		vd55g1_update_hblank_ctrl(sensor);
 		ret = 0;
 		break;
-	case V4L2_CID_DARKCAL_PEDESTAL:
-		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(0),
-				 ctrl->val, &ret);
-		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(1),
-				 ctrl->val, &ret);
-		break;
 #endif
 	default:
 		ret = -EINVAL;
-		TRACE("huh");
 		break;
 	}
 
@@ -1677,17 +1676,16 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	if (sensor->ext_vt_sync)
 		sensor->slave_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_slave_ctrl,
 						  NULL);
-#if 0
 	ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_temp_ctrl, NULL);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE |
 			       V4L2_CTRL_FLAG_READ_ONLY;
 	sensor->darkcal_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_darkcal_pedestal_ctrl, NULL);
+#if 0
 	sensor->led_ctrl = v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_FLASH_LED_MODE,
 			       V4L2_FLASH_LED_MODE_FLASH, ~0x7,
 			       V4L2_FLASH_LED_MODE_NONE);
 	sensor->hdr_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_hdr_ctrl, NULL);
-
 
 	if (hdl->error) {
 		ret = hdl->error;
