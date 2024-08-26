@@ -307,6 +307,7 @@ struct vd55g1 {
 	u16 oif_ctrl;
 	enum vd55g1_gpio_mode gpios[VD55G1_NB_GPIOS];
 	bool ext_vt_sync;
+	unsigned long ext_leds_mask;
 	int data_rate_in_mbps;
 	u32 pixel_clock;
 	struct {
@@ -1141,7 +1142,6 @@ unlock:
 		__v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
 		__v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
 		if (sensor->ext_vt_sync) {
-			TRACE("");
 			__v4l2_ctrl_grab(sensor->slave_ctrl, enable);
 		}
 	}
@@ -1214,7 +1214,6 @@ static int vd55g1_get_pad_fmt(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *pad_fmt;
 
 	mutex_lock(&sensor->lock);
-	TRACE("");
 
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY)
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
@@ -1259,7 +1258,6 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	}
 
 	mutex_lock(&sensor->lock);
-	TRACE("");
 
 	new_mode = v4l2_find_nearest_size(vd55g1_supported_modes,
 					  ARRAY_SIZE(vd55g1_supported_modes),
@@ -1399,7 +1397,6 @@ static int vd55g1_write_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
 	u32 gpio_val;
 	int ret = 0;
 
-	//TODO index2val
 	for_each_set_bit(io, &gpio_mask, VD55G1_NB_GPIOS) {
 		gpio_val = sensor->gpios[io];
 
@@ -1492,7 +1489,6 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
 		v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
 		mutex_lock(&sensor->lock);
-		TRACE("");
 #else
 		__v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
 		__v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
@@ -1534,6 +1530,8 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_SLAVE_MODE:
 		ret = vd55g1_write_gpios(sensor, VD55G1_VTSLAVE_GPIO);
+		if (ret)
+			break;
 		ret = vd55g1_write(sensor, VD55G1_REG_VT_CTRL, ctrl->val, &ret);
 		break;
 	case V4L2_CID_DARKCAL_PEDESTAL:
@@ -1542,10 +1540,10 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(1),
 				 ctrl->val, &ret);
 		break;
-#if 0
 	case V4L2_CID_FLASH_LED_MODE:
-		ret = vd55g1_apply_flash(sensor, ctrl->val);
+		ret = vd55g1_write_gpios(sensor, sensor->ext_leds_mask);
 		break;
+#if 0
 	case V4L2_CID_HDR_SENSOR_MODE:
 		sensor->hdr_ctrl->val = ctrl->val;
 		/* Max blanking changes with hdr mode */
@@ -1673,32 +1671,32 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
 						VD55G1_VBLANK_DEF, vblank_max,
 						1, VD55G1_VBLANK_DEF);
-	if (sensor->ext_vt_sync)
-		sensor->slave_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_slave_ctrl,
-						  NULL);
 	ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_temp_ctrl, NULL);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE |
 			       V4L2_CTRL_FLAG_READ_ONLY;
 	sensor->darkcal_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_darkcal_pedestal_ctrl, NULL);
+
+	/* Additional controls based on device tree properties */
+	if (sensor->ext_vt_sync)
+		sensor->slave_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_slave_ctrl,
+						  NULL);
+	if (sensor->ext_leds_mask) {
+		TRACE("");
+		sensor->led_ctrl =
+			v4l2_ctrl_new_std_menu(hdl, ops,
+					       V4L2_CID_FLASH_LED_MODE,
+					       V4L2_FLASH_LED_MODE_FLASH, 0,
+					       V4L2_FLASH_LED_MODE_NONE);
+	}
 #if 0
-	sensor->led_ctrl = v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_FLASH_LED_MODE,
-			       V4L2_FLASH_LED_MODE_FLASH, ~0x7,
-			       V4L2_FLASH_LED_MODE_NONE);
 	sensor->hdr_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_hdr_ctrl, NULL);
+#endif
 
 	if (hdl->error) {
 		ret = hdl->error;
 		goto free_ctrls;
 	}
-
-	/* Disable this control if not possible by device tree */
-	if (!vd55g1_can_be_slave(sensor)) {
-		v4l2_ctrl_s_ctrl(sensor->slave_ctrl, false);
-		v4l2_ctrl_grab(sensor->slave_ctrl, true);
-	}
-	//TODO disable flash if not device tree possible
-#endif
 
 	sensor->sd.ctrl_handler = hdl;
 	return 0;
@@ -1927,6 +1925,7 @@ static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 	/* Initialize GPIOs to default */
 	for (i = 0; i < VD55G1_NB_GPIOS; i++)
 		sensor->gpios[i] = VD55G1_GPIO_MODE_IN;
+	sensor->ext_leds_mask = 0;
 
 	/* Take into account optional 'st,leds' output for GPIOs */
 	ret = vd55g1_parse_dt_gpios_array(sensor, "st,leds", led_gpios,
@@ -1934,8 +1933,10 @@ static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 	if (ret)
 		return ret;
 
-	for (i = 0; i < nb_gpios_leds; i++)
+	for (i = 0; i < nb_gpios_leds; i++) {
 		sensor->gpios[led_gpios[i]] = VD55G1_GPIO_MODE_STROBE;
+		set_bit(led_gpios[i], &sensor->ext_leds_mask);
+	}
 
 	/* Take into account optional 'st,out-sync' output for GPIOs */
 	ret = vd55g1_parse_dt_gpios_array(sensor, "st,out-sync", out_sync_gpios,
@@ -2016,7 +2017,6 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	sensor->sd.entity.ops = &vd55g1_subdev_entity_ops;
 
-	TRACE("");
 	/* Init source pad */
 	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
 	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
@@ -2027,7 +2027,6 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	}
 
 #if 0
-	TRACE("");
 	ret = vd55g1_update_vblank(sensor, VD55G1_FRAME_LENGTH_DEF -
 				   sensor->current_mode->crop.height);
 	if (ret)
@@ -2043,7 +2042,6 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	sensor->active_crop.left = 2;
 	sensor->active_crop.top = 2;
 
-	TRACE("");
 	/*
 	 * Initiliaze controls after update_img_pad_format to make sure default
 	 * values are set.
