@@ -960,6 +960,40 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 	return ret;
 }
 
+//TODO rename update_gpio
+static int vd55g1_write_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
+{
+	unsigned long io;
+	u32 gpio_val;
+	int ret = 0;
+
+	for_each_set_bit(io, &gpio_mask, VD55G1_NB_GPIOS) {
+		gpio_val = sensor->gpios[io];
+
+		if (gpio_val == VD55G1_GPIO_MODE_VTSLAVE &&
+		    !sensor->slave_ctrl->val)
+			gpio_val = VD55G1_GPIO_MODE_IN;
+
+		if (gpio_val == VD55G1_GPIO_MODE_STROBE &&
+		    sensor->led_ctrl->val == V4L2_FLASH_LED_MODE_NONE)
+			gpio_val = VD55G1_GPIO_MODE_IN;
+#if 0
+			if (sensor->hdr == VD55G1_HDR_SUB) {
+				/* Make its context 1 counterpart strobe too */
+				ret = vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(1) + gpio,
+						       index2val[mode], NULL);
+				if (ret)
+					return ret;
+			}
+#endif
+
+		vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(0) + io, gpio_val,
+			     &ret);
+	}
+
+	return ret;
+}
+
 static int vd55g1_stream_on(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
@@ -968,12 +1002,6 @@ static int vd55g1_stream_on(struct vd55g1 *sensor)
 	u32 mipi_req_line_length;
 	u32 min_line_length;
 	int ret = 0;
-
-#if 0
-	ret = vd55g1_set_gpios(sensor);
-	if (ret)
-		goto err_rpm_put;
-#endif
 
 	//TODO move hblank calculation and store it in sensor, so you can update
 	//the hblank control with it
@@ -1005,6 +1033,11 @@ static int vd55g1_stream_on(struct vd55g1 *sensor)
 	ret = vd55g1_set_framefmt(sensor);
 	if (ret)
 		goto err_rpm_put;
+
+	/* Setup default GPIO values; could be overridden by V4L2 ctrl setup */
+	ret = vd55g1_write_gpios(sensor, GENMASK(VD55G1_NB_GPIOS - 1, 0));
+	if (ret)
+		return ret;
 
 	/* Apply settings from V4L2 ctrls */
 	ret = __v4l2_ctrl_handler_setup(&sensor->ctrl_handler);
@@ -1389,40 +1422,6 @@ static const struct v4l2_subdev_ops vd55g1_subdev_ops = {
 static const struct media_entity_operations vd55g1_subdev_entity_ops = {
 	.link_validate = v4l2_subdev_link_validate,
 };
-
-//TODO rename update_gpio
-static int vd55g1_write_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
-{
-	unsigned long io;
-	u32 gpio_val;
-	int ret = 0;
-
-	for_each_set_bit(io, &gpio_mask, VD55G1_NB_GPIOS) {
-		gpio_val = sensor->gpios[io];
-
-		if (gpio_val == VD55G1_GPIO_MODE_VTSLAVE &&
-		    !sensor->slave_ctrl->val)
-			gpio_val = VD55G1_GPIO_MODE_IN;
-
-		if (gpio_val == VD55G1_GPIO_MODE_STROBE &&
-		    sensor->led_ctrl->val == V4L2_FLASH_LED_MODE_NONE)
-			gpio_val = VD55G1_GPIO_MODE_IN;
-#if 0
-			if (sensor->hdr == VD55G1_HDR_SUB) {
-				/* Make its context 1 counterpart strobe too */
-				ret = vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(1) + gpio,
-						       index2val[mode], NULL);
-				if (ret)
-					return ret;
-			}
-#endif
-
-		vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(0) + io, gpio_val,
-			     &ret);
-	}
-
-	return ret;
-}
 
 static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
