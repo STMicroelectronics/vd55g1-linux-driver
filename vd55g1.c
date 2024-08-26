@@ -539,40 +539,6 @@ static int vd55g1_wait_state(struct vd55g1 *sensor, int state, int *err)
 	return vd55g1_poll_reg(sensor, VD55G1_REG_SYSTEM_FSM, state, err);
 }
 
-static int vd55g1_update_gpio_mode(struct vd55g1 *sensor, u32 mode,
-				   int gpio)
-{
-	int ret;
-
-	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB && mode == VD55G1_GPIO_MODE_STROBE) {
-		/* Make its context 1 counterpart strobe too */
-		ret = vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(1) + gpio,
-				       mode, NULL);
-		if (ret)
-			return ret;
-	}
-
-	return vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(0) + gpio,
-				mode, NULL);
-}
-
-static int vd55g1_set_gpios_array(struct vd55g1 *sensor, u32 *array,
-				  int size, enum vd55g1_gpio_mode mode)
-{
-	unsigned int i;
-	int ret;
-
-	for (i = 0; i < size;  i++) {
-		if (array[i] == ~0)
-			break;
-		ret = vd55g1_update_gpio_mode(sensor, mode, array[i]);
-		if (ret)
-			return -EINVAL;
-	}
-
-	return 0;
-}
-
 static int vd55g1_get_regulators(struct vd55g1 *sensor)
 {
 	int i;
@@ -704,32 +670,6 @@ static int vd55g1_lock_exposure(struct vd55g1 *sensor, u32 lock_val)
 
 	if (sensor->ae_ctrl->val == V4L2_EXPOSURE_AUTO)
 		vd55g1_write(sensor, VD55G1_REG_EXP_MODE(0), expo_state, &ret);
-
-	return ret;
-}
-
-#if 0
-static int vd55g1_apply_flash(struct vd55g1 *sensor, int flash)
-{
-	struct vd55g1_gpios *gpios = &sensor->gpios;
-
-	enum vd55g1_gpio_mode mode = flash ?
-				      VD55G1_GPIO_MODE_STROBE :
-				      VD55G1_GPIO_MODE_IN;
-
-	return vd55g1_set_gpios_array(sensor, gpios->leds,
-				      ARRAY_SIZE(gpios->leds), mode);
-}
-#endif
-
-static int vd55g1_apply_darkcal_pedestal(struct vd55g1 *sensor)
-{
-	int ret = 0;
-
-	vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(0),
-			 sensor->darkcal_ctrl->val, &ret);
-	vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(1),
-			 sensor->darkcal_ctrl->val, &ret);
 
 	return ret;
 }
@@ -997,7 +937,6 @@ static int vd55g1_write_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
 static int vd55g1_stream_on(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
-	u32 mipi_bps;
 	u32 mipi_req_line_time;
 	u32 mipi_req_line_length;
 	u32 min_line_length;
@@ -1614,7 +1553,6 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	const struct v4l2_ctrl_ops *ops = &vd55g1_ctrl_ops;
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
 	struct v4l2_ctrl *ctrl;
-	unsigned int patgen_size = ARRAY_SIZE(vd55g1_tp_menu) - 1;
 	unsigned int vblank_max = 0xffff - sensor->active_crop.height * 2;
 	unsigned int hblank = VD55G1_MIN_LINE_LENGTH - sensor->active_fmt.width;
 	int ret;
