@@ -110,7 +110,7 @@
 #define VD55G1_DUSTER_RING_ENABLE			BIT(4)
 #define VD55G1_REG_AE_TARGET_PERCENTAGE			CCI_REG8(0x0486)
 #define VD55G1_REG_VT_CTRL				CCI_REG8(0x0309)
-#define VD55G1_VT_SLAVE_GPIO				0
+#define VD55G1_VTSLAVE_GPIO				0
 #define VD55G1_REG_ERROR_CODE				CCI_REG16_LE(0x0010)
 #define VD55G1_REG_NEXT_CTX				CCI_REG16_LE(0x03e4)
 #define VD55G1_REG_EXPOSURE_USE_CASES			CCI_REG8(0x0312)
@@ -222,10 +222,10 @@ enum vd55g1_bin_mode {
 };
 
 enum vd55g1_gpio_mode {
-	VD55G1_GPIO_MODE_DISABLED,
-	VD55G1_GPIO_MODE_STROBE,
-	VD55G1_GPIO_MODE_VSYNC_OUT_0,
-	VD55G1_GPIO_MODE_VTSLAVE,
+	VD55G1_GPIO_MODE_FSYNC_OUT = 0x00,
+	VD55G1_GPIO_MODE_IN = 0x01,
+	VD55G1_GPIO_MODE_STROBE = 0x02,
+	VD55G1_GPIO_MODE_VTSLAVE= 0x0a,
 };
 
 struct vd55g1_mode {
@@ -541,19 +541,18 @@ static int vd55g1_wait_state(struct vd55g1 *sensor, int state, int *err)
 static int vd55g1_update_gpio_mode(struct vd55g1 *sensor, u32 mode,
 				   int gpio)
 {
-	u8 index2val[] = {0x01, 0x02, 0x06, 0x0a};
 	int ret;
 
 	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB && mode == VD55G1_GPIO_MODE_STROBE) {
 		/* Make its context 1 counterpart strobe too */
 		ret = vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(1) + gpio,
-				       index2val[mode], NULL);
+				       mode, NULL);
 		if (ret)
 			return ret;
 	}
 
 	return vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(0) + gpio,
-				index2val[mode], NULL);
+				mode, NULL);
 }
 
 static int vd55g1_set_gpios_array(struct vd55g1 *sensor, u32 *array,
@@ -715,7 +714,7 @@ static int vd55g1_apply_flash(struct vd55g1 *sensor, int flash)
 
 	enum vd55g1_gpio_mode mode = flash ?
 				      VD55G1_GPIO_MODE_STROBE :
-				      VD55G1_GPIO_MODE_DISABLED;
+				      VD55G1_GPIO_MODE_IN;
 
 	return vd55g1_set_gpios_array(sensor, gpios->leds,
 				      ARRAY_SIZE(gpios->leds), mode);
@@ -1406,11 +1405,11 @@ static int vd55g1_write_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
 
 		if (gpio_val == VD55G1_GPIO_MODE_VTSLAVE &&
 		    !sensor->slave_ctrl->val)
-			gpio_val = VD55G1_GPIO_MODE_DISABLED;
+			gpio_val = VD55G1_GPIO_MODE_IN;
 
 		if (gpio_val == VD55G1_GPIO_MODE_STROBE &&
 		    sensor->led_ctrl->val == V4L2_FLASH_LED_MODE_NONE)
-			gpio_val = VD55G1_GPIO_MODE_DISABLED;
+			gpio_val = VD55G1_GPIO_MODE_IN;
 #if 0
 			if (sensor->hdr == VD55G1_HDR_SUB) {
 				/* Make its context 1 counterpart strobe too */
@@ -1534,7 +1533,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd55g1_update_framelength(sensor, frame_length);
 		break;
 	case V4L2_CID_SLAVE_MODE:
-		ret = vd55g1_write_gpios(sensor, VD55G1_VT_SLAVE_GPIO);
+		ret = vd55g1_write_gpios(sensor, VD55G1_VTSLAVE_GPIO);
 		ret = vd55g1_write(sensor, VD55G1_REG_VT_CTRL, ctrl->val, &ret);
 		break;
 #if 0
@@ -1929,7 +1928,7 @@ static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 
 	/* Initialize GPIOs to default */
 	for (i = 0; i < VD55G1_NB_GPIOS; i++)
-		sensor->gpios[i] = VD55G1_GPIO_MODE_DISABLED;
+		sensor->gpios[i] = VD55G1_GPIO_MODE_IN;
 
 	/* Take into account optional 'st,leds' output for GPIOs */
 	ret = vd55g1_parse_dt_gpios_array(sensor, "st,leds", led_gpios,
@@ -1947,12 +1946,12 @@ static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 		return ret;
 
 	for (i = 0; i < nb_gpios_out; i++) {
-		if (sensor->gpios[out_sync_gpios[i]] != VD55G1_GPIO_MODE_DISABLED) {
+		if (sensor->gpios[out_sync_gpios[i]] != VD55G1_GPIO_MODE_IN) {
 			dev_err(&client->dev, "Multiple use of GPIO %d\n",
 				out_sync_gpios[i]);
 			return -EINVAL;
 		}
-		sensor->gpios[out_sync_gpios[i]] = VD55G1_GPIO_MODE_VSYNC_OUT_0;
+		sensor->gpios[out_sync_gpios[i]] = VD55G1_GPIO_MODE_FSYNC_OUT;
 	}
 
 	/* Take into account optional 'st,in-sync' input for GPIO0 */
@@ -1963,11 +1962,11 @@ static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 	} else if (ret == -EINVAL) {
 		sensor->ext_vt_sync = false;
 	} else {
-		if (in_sync_gpio != VD55G1_VT_SLAVE_GPIO) {
+		if (in_sync_gpio != VD55G1_VTSLAVE_GPIO) {
 			dev_err(&client->dev, "in-sync GPIO must be gpio0\n");
 			return -EINVAL;
 		}
-		if (sensor->gpios[in_sync_gpio] != VD55G1_GPIO_MODE_DISABLED) {
+		if (sensor->gpios[in_sync_gpio] != VD55G1_GPIO_MODE_IN) {
 			dev_err(&client->dev, "Multiple use of GPIO %d\n",
 				in_sync_gpio);
 			return -EINVAL;
