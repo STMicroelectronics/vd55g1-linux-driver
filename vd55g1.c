@@ -192,13 +192,13 @@ static const s64 vd55g1_ev_bias_menu[] = {
 };
 
 static const char * const vd55g1_hdr_mode_menu[] = {
+	"No HDR",
 	/*
 	 * This mode acquires 2 frames on the sensor, the first on is ditched
 	 * out and only used for auto exposure data, the second one is output to
 	 * the host
 	 */
 	"Internal subtraction",
-	"No HDR",
 };
 
 static const char * const vd55g1_supply_name[] = {
@@ -211,8 +211,8 @@ static const char * const vd55g1_supply_name[] = {
 static u64 link_freq[1];
 
 enum vd55g1_hdr_mode {
-	VD55G1_HDR_SUB,
 	VD55G1_NO_HDR,
+	VD55G1_HDR_SUB,
 };
 
 enum vd55g1_bin_mode {
@@ -636,14 +636,13 @@ static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
 	if (sensor->ae_ctrl->is_new)
 		vd55g1_write(sensor, VD55G1_REG_EXP_MODE(0), expo_state, &ret);
 
-#if 0
-	if (sensor->hdr == VD55G1_HDR_SUB) {
-		ret = vd55g1_write_reg(sensor, VD55G1_REG_EXP_MODE(1),
+	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB &&
+	    sensor->hdr_ctrl->is_new) {
+		ret = vd55g1_write(sensor, VD55G1_REG_EXP_MODE(1),
 				       VD55G1_EXP_BYPASS, NULL);
 		if (ret)
 			return ret;
 	}
-#endif
 
 	if (!is_auto && sensor->expo_ctrl->is_new)
 		vd55g1_write(sensor, VD55G1_REG_MANUAL_COARSE_EXPOSURE,
@@ -759,18 +758,16 @@ static int vd55g1_read_expo_cluster(struct vd55g1 *sensor, bool force_cur_val)
 	return ret;
 }
 
-static int vd55g1_update_framelength(struct vd55g1 *sensor, unsigned int frame_length)
+static int vd55g1_update_frame_length(struct vd55g1 *sensor, unsigned int frame_length)
 {
-#if 0
 	int ret = 0;
 
-	if (sensor->hdr == VD55G1_HDR_SUB) {
+	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB) {
 		vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(1),
-				 sensor->frame_length, &ret);
+				 frame_length, &ret);
 		if (ret)
 			return ret;
 	}
-#endif
 
 	return vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(0),
 			    frame_length, NULL);
@@ -817,7 +814,7 @@ static void vd55g1_update_img_pad_format(struct vd55g1 *sensor,
 	fmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
 }
 
-static int vd55g1_apply_hdr_mode(struct vd55g1 *sensor)
+static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 {
 	int ret = 0;
 
@@ -915,17 +912,16 @@ static int vd55g1_write_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
 			gpio_val = VD55G1_GPIO_MODE_IN;
 
 		if (gpio_val == VD55G1_GPIO_MODE_STROBE &&
-		    sensor->led_ctrl->val == V4L2_FLASH_LED_MODE_NONE)
+		    sensor->led_ctrl->val == V4L2_FLASH_LED_MODE_NONE) {
 			gpio_val = VD55G1_GPIO_MODE_IN;
-#if 0
-			if (sensor->hdr == VD55G1_HDR_SUB) {
+			if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB) {
 				/* Make its context 1 counterpart strobe too */
-				ret = vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(1) + gpio,
-						       index2val[mode], NULL);
+				ret = vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(1) + io,
+						       gpio_val, NULL);
 				if (ret)
 					return ret;
 			}
-#endif
+		}
 
 		vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(0) + io, gpio_val,
 			     &ret);
@@ -952,10 +948,8 @@ static int vd55g1_stream_on(struct vd55g1 *sensor)
 	mipi_req_line_length = mipi_req_line_time * sensor->pixel_clock / HZ_PER_MHZ;
 	/* Absolute time required for ADCs to convert pixels */
 	min_line_length = VD55G1_MIN_LINE_LENGTH;
-#if 0
 	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB)
 		min_line_length = VD55G1_MIN_LINE_LENGTH_SUB;
-#endif
 	/* Respect both constraint */
 	vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH,
 		     max(min_line_length, mipi_req_line_length), &ret);
@@ -1265,7 +1259,7 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 		sensor->active_fmt = sd_fmt->format;
 		sensor->active_crop = pad_crop;
 #if 0
-		/* Reset vblank and framelength to default */
+		/* Reset vblank and frame length to default */
 		ret = vd55g1_update_vblank(sensor,
 					   VD55G1_FRAME_LENGTH_DEF -
 					   new_mode->crop.height);
@@ -1401,7 +1395,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	unsigned int frame_length = 0;
-	unsigned int expo_max;
+	//unsigned int expo_max;
 	bool is_auto = false;
 	int ret;
 
@@ -1464,7 +1458,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd55g1_update_exposure_target(sensor, ctrl->val);
 		break;
 	case V4L2_CID_VBLANK:
-		ret = vd55g1_update_framelength(sensor, frame_length);
+		ret = vd55g1_update_frame_length(sensor, frame_length);
 		break;
 	case V4L2_CID_SLAVE_MODE:
 		ret = vd55g1_write_gpios(sensor, VD55G1_VTSLAVE_GPIO);
@@ -1481,14 +1475,13 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_FLASH_LED_MODE:
 		ret = vd55g1_write_gpios(sensor, sensor->ext_leds_mask);
 		break;
-#if 0
 	case V4L2_CID_HDR_SENSOR_MODE:
-		sensor->hdr_ctrl->val = ctrl->val;
+		ret = vd55g1_update_hdr_mode(sensor);
+#if 0
 		/* Max blanking changes with hdr mode */
 		vd55g1_update_hblank_ctrl(sensor);
-		ret = 0;
-		break;
 #endif
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -1537,6 +1530,7 @@ static const struct v4l2_ctrl_config vd55g1_slave_ctrl = {
 	.def		= 1,
 };
 
+//TODO use standard control if available
 static const struct v4l2_ctrl_config vd55g1_hdr_ctrl = {
 	.ops		= &vd55g1_ctrl_ops,
 	.id		= V4L2_CID_HDR_SENSOR_MODE,
@@ -1626,9 +1620,7 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 					       V4L2_FLASH_LED_MODE_FLASH, 0,
 					       V4L2_FLASH_LED_MODE_NONE);
 	}
-#if 0
 	sensor->hdr_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_hdr_ctrl, NULL);
-#endif
 
 	if (hdl->error) {
 		ret = hdl->error;
