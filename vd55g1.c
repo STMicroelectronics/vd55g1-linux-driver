@@ -194,7 +194,7 @@ static const s64 vd55g1_ev_bias_menu[] = {
 static const char * const vd55g1_hdr_mode_menu[] = {
 	"No HDR",
 	/*
-	 * This mode acquires 2 frames on the sensor, the first on is ditched
+	 * This mode acquires 2 frames on the sensor, the first one is ditched
 	 * out and only used for auto exposure data, the second one is output to
 	 * the host
 	 */
