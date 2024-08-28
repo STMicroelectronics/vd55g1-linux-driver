@@ -569,7 +569,7 @@ static int vd55g1_update_gpio_mode(struct vd55g1_dev *sensor, u32 mode,
 
 	if (sensor->hdr == VD55G1_HDR_SUB && mode == VD55G1_GPIO_MODE_STROBE) {
 		/* Make its context 1 counterpart strobe too */
-		ret = vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(0) + gpio,
+		ret = vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(1) + gpio,
 				       index2val[mode], NULL);
 		if (ret)
 			return ret;
