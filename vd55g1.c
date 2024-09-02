@@ -154,7 +154,7 @@
 #define VD55G1_WRITE_MULTIPLE_CHUNK_MAX			16
 #define VD55G1_NB_GPIOS					4
 #define VD55G1_NB_POLARITIES				3
-#define VD55G1_MIN_VBLANK				86
+#define VD55G1_VBLANK_MIN				86
 #define VD55G1_FRAME_LENGTH_DEF				1860 /* 60 fps */
 #define VD55G1_TIMEOUT_MS				500
 #define VD55G1_MEDIA_BUS_FMT_DEF			MEDIA_BUS_FMT_Y8_1X8
@@ -390,6 +390,28 @@ static s32 get_pixel_rate(struct vd55g1 *sensor)
 	return div64_u64((u64)sensor->data_rate_in_mbps,
 			 get_bpp_by_code(sensor->active_fmt.code));
 }
+
+static s32 get_min_line_length(struct vd55g1 *sensor)
+{
+	u32 mipi_req_line_time;
+	u32 mipi_req_line_length;
+	u32 min_line_length;
+
+	/* MIPI required time */
+	mipi_req_line_time = (sensor->active_crop.width *
+			       get_bpp_by_code(sensor->active_fmt.code) +
+			       VD55G1_MIPI_MARGIN) / (sensor->data_rate_in_mbps / MEGA);
+	mipi_req_line_length = mipi_req_line_time * sensor->pixel_clock / HZ_PER_MHZ;
+
+	/* Absolute time required for ADCs to convert pixels */
+	min_line_length = VD55G1_MIN_LINE_LENGTH;
+	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB)
+		min_line_length = VD55G1_MIN_LINE_LENGTH_SUB;
+
+	/* Respect both constraint */
+	return max(min_line_length, mipi_req_line_length);
+}
+
 
 #if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
 static int vd55g1_read(struct vd55g1 *sensor, u32 reg, u32 *val, int *err)
@@ -933,26 +955,7 @@ static int vd55g1_write_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
 static int vd55g1_stream_on(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
-	u32 mipi_req_line_time;
-	u32 mipi_req_line_length;
-	u32 min_line_length;
 	int ret = 0;
-
-	//TODO move hblank calculation and store it in sensor, so you can update
-	//the hblank control with it
-
-	/* MIPI required time */
-	mipi_req_line_time = (sensor->active_crop.width *
-			       get_bpp_by_code(sensor->active_fmt.code) +
-			       VD55G1_MIPI_MARGIN) / (sensor->data_rate_in_mbps / MEGA);
-	mipi_req_line_length = mipi_req_line_time * sensor->pixel_clock / HZ_PER_MHZ;
-	/* Absolute time required for ADCs to convert pixels */
-	min_line_length = VD55G1_MIN_LINE_LENGTH;
-	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB)
-		min_line_length = VD55G1_MIN_LINE_LENGTH_SUB;
-	/* Respect both constraint */
-	vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH,
-		     max(min_line_length, mipi_req_line_length), &ret);
 
 	vd55g1_write(sensor, VD55G1_REG_EXT_CLOCK, sensor->xclk_freq, &ret);
 
@@ -1396,6 +1399,9 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	unsigned int frame_length = 0;
 	//unsigned int expo_max;
+	//TODO factorize as a function
+	unsigned int hblank_min = get_min_line_length(sensor) - sensor->active_crop.width;
+	unsigned int hblank_max = 0xffff - sensor->active_crop.width;
 	bool is_auto = false;
 	int ret;
 
@@ -1425,6 +1431,15 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		__v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
 		__v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
 #endif
+		break;
+	case V4L2_CID_HDR_SENSOR_MODE:
+		/* Discriminate if the userspace changed the control value */
+		if (ctrl->val != ctrl->cur.val ) {
+			/* Max horizontal blanking changes with hdr mode */
+			__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank_min, hblank_max, 1,
+						 hblank_min);
+			ret = __v4l2_ctrl_s_ctrl(sensor->hblank_ctrl, hblank_min);
+		}
 		break;
 	default:
 		break;
@@ -1477,10 +1492,11 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_HDR_SENSOR_MODE:
 		ret = vd55g1_update_hdr_mode(sensor);
-#if 0
-		/* Max blanking changes with hdr mode */
-		vd55g1_update_hblank_ctrl(sensor);
-#endif
+		break;
+	case V4L2_CID_HBLANK:
+		ret =  vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH,
+				    sensor->active_crop.width + ctrl->val,
+				    NULL);
 		break;
 	default:
 		ret = -EINVAL;
@@ -1548,7 +1564,8 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
 	struct v4l2_ctrl *ctrl;
 	unsigned int vblank_max = 0xffff - sensor->active_crop.height * 2;
-	unsigned int hblank = VD55G1_MIN_LINE_LENGTH - sensor->active_fmt.width;
+	unsigned int hblank_min;
+	unsigned int hblank_max = 0xffff - sensor->active_crop.width;
 	int ret;
 
 	v4l2_ctrl_handler_init(hdl, 16);
@@ -1594,11 +1611,11 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 			       ARRAY_SIZE(vd55g1_ev_bias_menu) - 1,
 			       ARRAY_SIZE(vd55g1_ev_bias_menu) / 2,
 			       vd55g1_ev_bias_menu);
-
+	sensor->hdr_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_hdr_ctrl, NULL);
+	hblank_min = get_min_line_length(sensor) - sensor->active_crop.width;
 	sensor->hblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
-						hblank, hblank, 1, hblank);
-	if (sensor->hblank_ctrl)
-		sensor->hblank_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
+						hblank_min, hblank_max, 1,
+						hblank_min);
 	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
 						VD55G1_VBLANK_DEF, vblank_max,
 						1, VD55G1_VBLANK_DEF);
@@ -1613,14 +1630,12 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 		sensor->slave_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_slave_ctrl,
 						  NULL);
 	if (sensor->ext_leds_mask) {
-		TRACE("");
 		sensor->led_ctrl =
 			v4l2_ctrl_new_std_menu(hdl, ops,
 					       V4L2_CID_FLASH_LED_MODE,
 					       V4L2_FLASH_LED_MODE_FLASH, 0,
 					       V4L2_FLASH_LED_MODE_NONE);
 	}
-	sensor->hdr_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_hdr_ctrl, NULL);
 
 	if (hdl->error) {
 		ret = hdl->error;
