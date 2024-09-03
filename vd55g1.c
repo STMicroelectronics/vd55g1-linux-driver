@@ -1287,15 +1287,14 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 					   VD55G1_FRAME_LENGTH_DEF -
 					   new_mode->crop.height);
 
-		/* Update controls to reflect new mode */
-		__v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
-					 get_pixel_rate(sensor));
-		vd55g1_update_hblank_ctrl(sensor);
 		/* Max exposure changes with vblank */
 		expo_max = sensor->frame_length - VD55G1_EXPO_MAX_TERM;
 		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
 					 VD55G1_EXPO_DEF);
 #endif
+		/* Update controls to reflect new mode */
+		__v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
+					 get_pixel_rate(sensor));
 		/* Update hblank according to new width */
 		hblank = get_hblank_limits(sensor);
 		__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank.min, hblank.max, 1,
