@@ -1222,6 +1222,9 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *format;
 	struct v4l2_rect pad_crop;
 	unsigned int binning;
+	//TODO function this
+	unsigned int hblank_min;
+	unsigned int hblank_max;
 	int ret = 0;
 
 	if (sensor->streaming) {
@@ -1277,12 +1280,13 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 		expo_max = sensor->frame_length - VD55G1_EXPO_MAX_TERM;
 		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
 					 VD55G1_EXPO_DEF);
-		/* Update hblank according to new width */
-		hblank = sensor->line_length - sensor->current_mode->width;
-		__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank, hblank, 1,
-					 hblank);
-		ret = __v4l2_ctrl_s_ctrl(sensor->hblank_ctrl, hblank);
 #endif
+		/* Update hblank according to new width */
+		hblank_min = get_min_line_length(sensor) - sensor->active_crop.width;
+		hblank_max = 0xffff - sensor->active_crop.width;
+		__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank_min, hblank_max, 1,
+					 hblank_min);
+		ret = __v4l2_ctrl_s_ctrl(sensor->hblank_ctrl, hblank_min);
 	}
 
 	mutex_unlock(&sensor->lock);
