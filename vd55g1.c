@@ -1580,7 +1580,7 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	const struct v4l2_ctrl_ops *ops = &vd55g1_ctrl_ops;
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
 	struct v4l2_ctrl *ctrl;
-	unsigned int vblank_max = 0xffff - sensor->active_crop.height * 2;
+	unsigned int vblank_max = 0xffff - sensor->active_crop.height;
 	struct hblank_limits hblank;
 	int ret;
 
