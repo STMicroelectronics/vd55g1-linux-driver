@@ -418,10 +418,10 @@ static s32 get_min_line_length(struct vd55g1 *sensor)
 	return max(min_line_length, mipi_req_line_length);
 }
 
-static struct hblank_limits get_hblank_limits(struct vd55g1 *sensor,
-			      struct v4l2_rect crop)
+static struct hblank_limits get_hblank_limits(struct vd55g1 *sensor)
 {
 	struct hblank_limits limits;
+	struct v4l2_rect crop = sensor->active_crop;
 
 	limits.min = get_min_line_length(sensor) - crop.width;
 	limits.max = VD55G1_MAX_LINE_LENGTH - crop.width;
@@ -1297,7 +1297,7 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 					 VD55G1_EXPO_DEF);
 #endif
 		/* Update hblank according to new width */
-		hblank = get_hblank_limits(sensor, sensor->active_crop);
+		hblank = get_hblank_limits(sensor);
 		__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank.min, hblank.max, 1,
 					 hblank.min);
 		ret = __v4l2_ctrl_s_ctrl(sensor->hblank_ctrl, hblank.min);
@@ -1419,8 +1419,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	unsigned int frame_length = 0;
 	//unsigned int expo_max;
-	struct hblank_limits hblank = get_hblank_limits(sensor,
-							sensor->active_crop);
+	struct hblank_limits hblank = get_hblank_limits(sensor);
 	bool is_auto = false;
 	int ret;
 
@@ -1630,7 +1629,7 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 			       ARRAY_SIZE(vd55g1_ev_bias_menu) / 2,
 			       vd55g1_ev_bias_menu);
 	sensor->hdr_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_hdr_ctrl, NULL);
-	hblank = get_hblank_limits(sensor, sensor->active_crop);
+	hblank = get_hblank_limits(sensor);
 	sensor->hblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
 						hblank.min, hblank.max, 1,
 						hblank.min);
