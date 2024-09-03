@@ -1098,6 +1098,7 @@ unlock:
 		v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
 		v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
 		v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
+		v4l2_ctrl_grab(sensor->hblank_ctrl, enable);
 		if (sensor->ext_vt_sync)
 			v4l2_ctrl_grab(sensor->slave_ctrl, enable);
 	}
@@ -1110,6 +1111,7 @@ unlock:
 		__v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
 		__v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
 		__v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
+		__v4l2_ctrl_grab(sensor->hblank_ctrl, enable);
 		if (sensor->ext_vt_sync) {
 			__v4l2_ctrl_grab(sensor->slave_ctrl, enable);
 		}
