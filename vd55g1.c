@@ -161,7 +161,7 @@
 #define VD55G1_DARKCAL_PEDESTAL_DEF			0x40
 #define VD55G1_DGAIN_DEF				256
 #define VD55G1_AGAIN_DEF				19
-#define VD55G1_VBLANK_DEF				4000
+#define VD55G1_VBLANK_DEF				4000 //TODO must be always 60fps, use default framelength instead ?
 #define VD55G1_EXPO_MAX_TERM				64
 #define VD55G1_EXPO_DEF					500
 #define VD55G1_MIN_LINE_LENGTH				1128
@@ -1240,7 +1240,7 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	struct v4l2_rect pad_crop;
 	unsigned int binning;
 	struct hblank_limits hblank;
-	int ret = 0;
+	unsigned int vblank_max;
 
 	if (sensor->streaming) {
 		return -EBUSY;
@@ -1281,12 +1281,13 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 		//TODO remove once active state is ready
 		sensor->active_fmt = sd_fmt->format;
 		sensor->active_crop = pad_crop;
-#if 0
 		/* Reset vblank and frame length to default */
-		ret = vd55g1_update_vblank(sensor,
-					   VD55G1_FRAME_LENGTH_DEF -
-					   new_mode->crop.height);
-
+		//TODO factorize as vblank limits ?
+		vblank_max = 0xffff - sensor->active_crop.height;
+		__v4l2_ctrl_modify_range(sensor->vblank_ctrl, VD55G1_VBLANK_DEF, vblank_max, 1,
+					 VD55G1_VBLANK_DEF);
+		__v4l2_ctrl_s_ctrl(sensor->vblank_ctrl, VD55G1_VBLANK_DEF);
+#if 0
 		/* Max exposure changes with vblank */
 		expo_max = sensor->frame_length - VD55G1_EXPO_MAX_TERM;
 		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
@@ -1299,12 +1300,12 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 		hblank = get_hblank_limits(sensor);
 		__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank.min, hblank.max, 1,
 					 hblank.min);
-		ret = __v4l2_ctrl_s_ctrl(sensor->hblank_ctrl, hblank.min);
+		__v4l2_ctrl_s_ctrl(sensor->hblank_ctrl, hblank.min);
 	}
 
 	mutex_unlock(&sensor->lock);
 
-	return ret;
+	return 0;
 }
 
 #if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
@@ -1597,7 +1598,7 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 
 	/* Exposition cluster */
 	sensor->ae_ctrl = v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_EXPOSURE_AUTO, 1, ~0x3,
-			       V4L2_EXPOSURE_AUTO); //TODO why < 728
+			       V4L2_EXPOSURE_AUTO);
 	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN, 0, 0x1c, 1,
 			  VD55G1_AGAIN_DEF);
 	sensor->dgain_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN, 256, 0xffff, 1,
@@ -1986,12 +1987,6 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 		return ret;
 	}
 
-#if 0
-	ret = vd55g1_update_vblank(sensor, VD55G1_FRAME_LENGTH_DEF -
-				   sensor->current_mode->crop.height);
-	if (ret)
-		goto error_power_off;
-#endif
 	/* Init vd56g3 struct : default resolution + raw8 */
 	sensor->streaming = false;
 	vd55g1_update_img_pad_format(sensor, &vd55g1_supported_modes[def_mode],
