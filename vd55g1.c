@@ -155,18 +155,17 @@
 #define VD55G1_NB_GPIOS					4
 #define VD55G1_NB_POLARITIES				3
 #define VD55G1_VBLANK_MIN				86
-#define VD55G1_FRAME_LENGTH_DEF				1860 /* 60 fps */
 #define VD55G1_TIMEOUT_MS				500
 #define VD55G1_MEDIA_BUS_FMT_DEF			MEDIA_BUS_FMT_Y8_1X8
 #define VD55G1_DARKCAL_PEDESTAL_DEF			0x40
 #define VD55G1_DGAIN_DEF				256
 #define VD55G1_AGAIN_DEF				19
-#define VD55G1_VBLANK_DEF				4000 //TODO must be always 60fps, use default framelength instead ?
 #define VD55G1_EXPO_MAX_TERM				64
 #define VD55G1_EXPO_DEF					500
 #define VD55G1_MIN_LINE_LENGTH				1128
 #define VD55G1_MIN_LINE_LENGTH_SUB			1344
 #define VD55G1_MAX_LINE_LENGTH				0xffff
+#define VD55G1_FRAME_LENGTH_DEF				1860 /* 60 fps */
 #define VD55G1_MIPI_MARGIN				900
 #define VD55G1_PCLK_DIVISOR				5
 #define VD55G1_CTX_OFFSET				0x50
@@ -1241,6 +1240,7 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	unsigned int binning;
 	struct hblank_limits hblank;
 	unsigned int vblank_max;
+	unsigned int vblank_def = VD55G1_FRAME_LENGTH_DEF - sensor->active_crop.height;
 
 	if (sensor->streaming) {
 		return -EBUSY;
@@ -1283,10 +1283,10 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 		sensor->active_crop = pad_crop;
 		/* Reset vblank and frame length to default */
 		//TODO factorize as vblank limits ?
+		vblank_def = VD55G1_FRAME_LENGTH_DEF - sensor->active_crop.height;
 		vblank_max = 0xffff - sensor->active_crop.height;
-		__v4l2_ctrl_modify_range(sensor->vblank_ctrl, VD55G1_VBLANK_DEF, vblank_max, 1,
-					 VD55G1_VBLANK_DEF);
-		__v4l2_ctrl_s_ctrl(sensor->vblank_ctrl, VD55G1_VBLANK_DEF);
+		__v4l2_ctrl_modify_range(sensor->vblank_ctrl, VD55G1_VBLANK_MIN, vblank_max, 1,
+					 vblank_def);
 #if 0
 		/* Max exposure changes with vblank */
 		expo_max = sensor->frame_length - VD55G1_EXPO_MAX_TERM;
@@ -1300,7 +1300,6 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 		hblank = get_hblank_limits(sensor);
 		__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank.min, hblank.max, 1,
 					 hblank.min);
-		__v4l2_ctrl_s_ctrl(sensor->hblank_ctrl, hblank.min);
 	}
 
 	mutex_unlock(&sensor->lock);
@@ -1581,6 +1580,7 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
 	struct v4l2_ctrl *ctrl;
 	unsigned int vblank_max = 0xffff - sensor->active_crop.height;
+	unsigned int vblank_def = VD55G1_FRAME_LENGTH_DEF - sensor->active_crop.height;
 	struct hblank_limits hblank;
 	int ret;
 
@@ -1633,8 +1633,8 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 						hblank.min, hblank.max, 1,
 						hblank.min);
 	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
-						VD55G1_VBLANK_DEF, vblank_max,
-						1, VD55G1_VBLANK_DEF);
+						VD55G1_VBLANK_MIN, vblank_max,
+						1, vblank_def);
 	ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_temp_ctrl, NULL);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE |
