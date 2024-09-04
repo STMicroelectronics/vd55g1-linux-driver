@@ -1456,7 +1456,6 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 			/* Max horizontal blanking changes with hdr mode */
 			__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank.min, hblank.max, 1,
 						 hblank.min);
-			ret = __v4l2_ctrl_s_ctrl(sensor->hblank_ctrl, hblank.min);
 		}
 		break;
 	default:
