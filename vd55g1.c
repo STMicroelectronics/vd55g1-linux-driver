@@ -98,7 +98,7 @@
 #define VD55G1_REG_APPLIED_ANALOG_GAIN			CCI_REG16_LE(0x00ea)
 #define VD55G1_REG_APPLIED_DIGITAL_GAIN			CCI_REG16_LE(0x00ec)
 #define VD55G1_REG_AE_FORCE_COLDSTART			CCI_REG16_LE(0x0308)
-#define VD55G1_REG_AE_COLDSTART_EXP_TIME		CCI_REG32_LE(0x0374) //TODO
+#define VD55G1_REG_AE_COLDSTART_EXP_TIME		CCI_REG32_LE(0x0374)
 #define VD55G1_REG_READOUT_CTRL				CCI_REG8(0x052e)
 #define VD55G1_REG_DARKCAL_CTRL				CCI_REG8(0x032a)
 #define VD55G1_DARKCAL_BYPASS				0
@@ -322,11 +322,6 @@ struct vd55g1 {
 	unsigned long ext_leds_mask;
 	int data_rate_in_mbps;
 	u32 pixel_clock;
-	struct {
-		u16 expo;
-		u16 dgain;
-		u8 again;
-	} cold_start;
 	/* Lock to protect all members below */
 	struct mutex lock;
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -855,6 +850,31 @@ static int vd55g1_apply_reset(struct vd55g1 *sensor)
 	return vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_READY_TO_BOOT, NULL);
 }
 
+static int vd55g1_apply_cold_start(struct vd55g1 *sensor)
+{
+	/*
+	 * Cold start register is a single register expressed as exposure time
+	 * in us. This differ from status registers being a combination of
+	 * exposure, digital gain, and analog gain, requiring the following
+	 * format conversion.
+	 */
+	unsigned int line_length = sensor->active_crop.width +
+				   sensor->hblank_ctrl->val;
+	unsigned int line_time_us = DIV_ROUND_UP(line_length * MEGA,
+						 sensor->pixel_clock);
+	u8 d_gain = DIV_ROUND_CLOSEST(sensor->dgain_ctrl->val, 1 << 8);
+	u8 a_gain = DIV_ROUND_CLOSEST(32, (32 - sensor->again_ctrl->val));
+	unsigned int expo_us = sensor->expo_ctrl->val * d_gain * a_gain *
+			       line_time_us;
+	int ret = 0;
+
+	vd55g1_write(sensor, VD55G1_REG_AE_FORCE_COLDSTART, 1, &ret);
+	vd55g1_write(sensor, VD55G1_REG_AE_COLDSTART_EXP_TIME, expo_us,
+			 &ret);
+
+	return ret;
+}
+
 static void vd55g1_update_img_pad_format(struct vd55g1 *sensor,
 				 const struct vd55g1_mode *mode,
 				 u32 code,
@@ -1006,6 +1026,10 @@ static int vd55g1_stream_on(struct vd55g1 *sensor)
 
 	/* Setup default GPIO values; could be overridden by V4L2 ctrl setup */
 	ret = vd55g1_write_gpios(sensor, GENMASK(VD55G1_NB_GPIOS - 1, 0));
+	if (ret)
+		return ret;
+
+	ret = vd55g1_apply_cold_start(sensor);
 	if (ret)
 		return ret;
 
