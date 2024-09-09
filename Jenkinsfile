@@ -41,7 +41,7 @@ pipeline {
 				dir('media_tree') {
 					sh 'git fetch --depth 1'
 					sh 'git reset --hard origin/master'
-					sh 'find ../pristine/ -name "*[^mod].c" -not -path "*debian*" -print0 | xargs -0 scripts/checkpatch.pl --max-line-length=80 --strict --ignore=LINUX_VERSION_CODE --ignore=UNDOCUMENTED_DT_STRING -f'
+					sh 'find ../pristine/ -name "*.c" -not -name "*mod.c" -not -path "*debian*" -print0 | xargs -0 scripts/checkpatch.pl --max-line-length=80 --strict --ignore=LINUX_VERSION_CODE --ignore=UNDOCUMENTED_DT_STRING -f'
 				}
 			}
 		}
@@ -88,7 +88,8 @@ pipeline {
 										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/vd55g1/stable/"
 									}
 								]
-							}'''
+							}''',
+							failNoOp: true
 						)
 					} else {
 						rtUpload (
@@ -105,7 +106,8 @@ pipeline {
 										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/vd55g1/unstable/"
 									}
 								]
-							}'''
+							}''',
+							failNoOp: true
 						)
 					}
 				}

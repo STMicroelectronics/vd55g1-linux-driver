@@ -90,7 +90,7 @@
 #define VD55G1_REG_DARKCAL_CTRL				VD55G1_REG_8BIT(0x032a)
 #define VD55G1_DARKCAL_BYPASS				0
 #define VD55G1_DARKCAL_AUTO				1
-#define VD55G1_REG_DUSTER_CTRL				VD55G1_REG_8BIT(0x0316)
+#define VD55G1_REG_DUSTER_CTRL				VD55G1_REG_8BIT(0x03ea)
 #define VD55G1_DUSTER_ENABLE				BIT(0)
 #define VD55G1_DUSTER_DISABLE				0
 #define VD55G1_DUSTER_DYN_ENABLE			BIT(1)
@@ -569,7 +569,7 @@ static int vd55g1_update_gpio_mode(struct vd55g1_dev *sensor, u32 mode,
 
 	if (sensor->hdr == VD55G1_HDR_SUB && mode == VD55G1_GPIO_MODE_STROBE) {
 		/* Make its context 1 counterpart strobe too */
-		ret = vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(0) + gpio,
+		ret = vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(1) + gpio,
 				       index2val[mode], NULL);
 		if (ret)
 			return ret;
