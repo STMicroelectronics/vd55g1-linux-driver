@@ -1,3 +1,9 @@
+vd55g1-dkms (1.0.3-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Benjamin Mugnier <benjamin.mugnier@st.com>  Mon, 09 Sep 2024 15:34:10 +0200
+
 vd55g1-dkms (1.0.2-2) unstable; urgency=medium
 
   * Fix dkms package not building
