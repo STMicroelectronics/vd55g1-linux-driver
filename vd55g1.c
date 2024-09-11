@@ -1053,26 +1053,18 @@ err_rpm_put:
 static int vd55g1_stream_off(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
-	int ret;
+	int ret = 0;
 
 	/* Retrieve Expo cluster to enable coldstart of AE */
 	ret = vd55g1_read_expo_cluster(sensor, true);
 
-	ret = vd55g1_write(sensor, VD55G1_REG_STREAMING,
-			       VD55G1_STREAMING_STOP_STREAM, NULL);
-	if (ret)
-		goto err_str_dis;
+	vd55g1_write(sensor, VD55G1_REG_STREAMING, VD55G1_STREAMING_STOP_STREAM,
+		     &ret);
+	vd55g1_poll_reg(sensor, VD55G1_REG_STREAMING, 0, &ret);
+	vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY, &ret);
 
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STREAMING, 0, NULL);
 	if (ret)
-		goto err_str_dis;
-
-	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY, NULL);
-
-err_str_dis:
-	if (ret)
-		WARN(1, "Can't disable stream");
-	pm_runtime_put(&client->dev);
+		dev_warn(&client->dev, "Can't disable stream");
 
 	return ret;
 }
@@ -2105,17 +2097,10 @@ static int vd55g1_probe(struct i2c_client *client)
 				     "Failed to init regmap.");
 
 	TRACE("power on");
+	/* Detect if sensor is present and its revision is supported */
 	ret = vd55g1_power_on(sensor);
 	if (ret)
 		return ret;
-
-	TRACE("pm runtime");
-	/* Enable runtime PM and turn off the device */
-	pm_runtime_set_active(dev);
-	pm_runtime_get_noresume(dev);
-	pm_runtime_enable(dev);
-	pm_runtime_set_autosuspend_delay(dev, 4000);
-	pm_runtime_use_autosuspend(dev);
 
 	TRACE("subdev init");
 	ret = vd55g1_subdev_init(sensor);
@@ -2131,9 +2116,12 @@ static int vd55g1_probe(struct i2c_client *client)
 		goto err_subdev;
 	}
 
-	pm_runtime_set_autosuspend_delay(&client->dev, 1000);
+	TRACE("pm runtime");
+	pm_runtime_set_active(dev);
+	pm_runtime_enable(dev);
+	pm_runtime_set_autosuspend_delay(dev, 4000);
+	pm_runtime_use_autosuspend(dev);
 	pm_runtime_mark_last_busy(dev);
-	pm_runtime_use_autosuspend(&client->dev);
 
 	dev_dbg(&client->dev, "vd55g1 probe successfully");
 
@@ -2143,7 +2131,6 @@ err_subdev:
 	vd55g1_subdev_cleanup(sensor);
 err_power_off:
 	pm_runtime_disable(dev);
-	pm_runtime_put_noidle(dev);
 	vd55g1_power_off(sensor);
 
 	return ret;
