@@ -457,7 +457,7 @@ static int vd55g1_read(struct vd55g1 *sensor, u32 reg, u32 *val, int *err)
 
 	ret = regmap_bulk_read(sensor->regmap, reg, buf, len);
 	if (ret) {
-		dev_err(&client->dev, "%s: Error reading reg 0x%4x: %d\n",
+		dev_err(&client->dev, "%s: Error reading reg 0x%04x: %d\n",
 			__func__, reg, ret);
 		goto out;
 	}
@@ -518,7 +518,7 @@ static int vd55g1_write(struct vd55g1 *sensor, u32 reg, u32 val, int *err)
 
 	ret = regmap_bulk_write(sensor->regmap, reg, buf, len);
 	if (ret)
-		dev_err(&client->dev, "%s: Error writing reg 0x%4x: %d\n",
+		dev_err(&client->dev, "%s: Error writing reg 0x%04x: %d\n",
 			__func__, reg, ret);
 
 out:
