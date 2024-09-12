@@ -1250,6 +1250,8 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	unsigned int binning;
 	struct hblank_limits hblank;
 	struct vblank_limits vblank;
+	unsigned int frame_length = 0;
+	unsigned int expo_max;
 
 	if (sensor->streaming)
 		return -EBUSY;
@@ -1293,13 +1295,13 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 		vblank = get_vblank_limits(sensor);
 		__v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank.min,
 					 vblank.max, 1, vblank.def);
-#if 0
 		/* Max exposure changes with vblank */
-		expo_max = sensor->frame_length - VD55G1_EXPO_MAX_TERM;
+		frame_length = sensor->active_crop.height +
+			       sensor->vblank_ctrl->val;
+		expo_max = frame_length - VD55G1_EXPO_MAX_TERM;
 		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
 					 VD55G1_EXPO_DEF);
-#endif
-		/* Update controls to reflect new mode */
+		/* Update pixel rate to reflect new bpp */
 		__v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
 					 get_pixel_rate(sensor));
 		/* Update hblank according to new width */
@@ -1423,7 +1425,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	unsigned int frame_length = 0;
-	//unsigned int expo_max;
+	unsigned int expo_max;
 	struct hblank_limits hblank = get_hblank_limits(sensor);
 	bool is_auto = false;
 	int ret;
@@ -1437,11 +1439,9 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	switch (ctrl->id) {
 	case V4L2_CID_VBLANK:
 		frame_length = sensor->active_crop.height + ctrl->val;
-#if 0
 		expo_max = frame_length - VD55G1_EXPO_MAX_TERM;
 		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
 					 VD55G1_EXPO_DEF);
-#endif
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
 		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
