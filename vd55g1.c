@@ -1086,6 +1086,7 @@ static int vd55g1_patch(struct vd55g1 *sensor)
 	return 0;
 }
 
+//TODO move to new API
 static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
@@ -1243,6 +1244,7 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 			      struct v4l2_subdev_format *sd_fmt)
 #endif
 {
+
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	const struct vd55g1_mode *new_mode;
 	struct v4l2_mbus_framefmt *format;
@@ -1266,15 +1268,6 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	vd55g1_update_img_pad_format(sensor, new_mode, sd_fmt->format.code,
 				     &sd_fmt->format);
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-	format = v4l2_subdev_get_try_format(sd, cfg, sd_fmt->pad);
-#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
-	format = v4l2_subdev_get_try_format(sd, sd_state, sd_fmt->pad);
-#else
-	format = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
-#endif
-	*format = sd_fmt->format;
-
 	/*
 	 * Use binning to maximize the crop rectangle size, and centre it in the
 	 * sensor.
@@ -1287,7 +1280,17 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	pad_crop.left = (VD55G1_WIDTH - pad_crop.width) / 2;
 	pad_crop.top = (VD55G1_HEIGHT - pad_crop.height) / 2;
 
-	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE) {
+	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
+#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+		format = v4l2_subdev_get_try_format(sd, cfg, sd_fmt->pad);
+#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
+		format = v4l2_subdev_get_try_format(sd, sd_state, sd_fmt->pad);
+#else
+		format = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
+#endif
+		*format = sd_fmt->format;
+	}
+	else {
 		//TODO remove once active state is ready
 		sensor->active_fmt = sd_fmt->format;
 		sensor->active_crop = pad_crop;
