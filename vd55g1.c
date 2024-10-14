@@ -27,7 +27,33 @@
 /* Backward compatibility */
 #include <linux/version.h>
 
-#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+#define KERNEL_LACKS_CCI \
+	(KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_STREAMS \
+	(KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_HDR_CTRL \
+	(KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_REMOVE_INT_RETURN \
+	(KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_ACTIVE_STATES \
+	(KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_SUBDEV_STATES \
+	(KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_LOCKED_GRAB \
+	(KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_NEW_EP_ALLOC \
+	(KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE)
+
+/* Handle functions rename */
+#if KERNEL_VERSION(6, 9, 0) > LINUX_VERSION_CODE
+#define __pm_runtime_put_autosuspend(a) pm_runtime_put_autosuspend(a)
+#endif
+
+#if KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE
+#define container_of_const(a, b, c) container_of(a, b, c)
+#endif
+
+#if KERNEL_LACKS_CCI
 /*
  * Warning : CCI_REGxy_LE definitions doesn't fit exactly with v4l2-cci.h .
  * In fact endianness is managed directly in vd55g1_read/write() functions.
@@ -172,7 +198,7 @@
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
 #define V4L2_CID_SLAVE_MODE			(V4L2_CID_USER_BASE | 0x1022)
-#if KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_HDR_CTRL
 #define V4L2_CID_HDR_SENSOR_MODE		(V4L2_CID_USER_BASE | 0x1004)
 #endif
 
@@ -253,7 +279,7 @@ static const struct vd55g1_fmt_desc vd55g1_mbus_codes[] = {
 	},
 };
 
-#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_CCI
 /* Big endian register addresses and 8b, 16b or 32b little endian values. */
 static const struct regmap_config vd55g1_regmap_config = {
 	.reg_bits = 16,
@@ -319,8 +345,6 @@ struct vd55g1 {
 	unsigned long ext_leds_mask;
 	int data_rate_in_mbps;
 	u32 pixel_clock;
-	/* Lock to protect all members below */
-	struct mutex lock;
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_ctrl *pixel_rate_ctrl;
 	struct v4l2_ctrl *vblank_ctrl;
@@ -343,22 +367,21 @@ struct vd55g1 {
 	struct v4l2_ctrl *led_ctrl;
 	struct v4l2_ctrl *hdr_ctrl;
 	bool streaming;
+#if KERNEL_LACKS_ACTIVE_STATES
+	struct mutex lock;
 	struct v4l2_mbus_framefmt active_fmt;
 	struct v4l2_rect active_crop;
+#endif
 };
 
 static inline struct vd55g1 *to_vd55g1(struct v4l2_subdev *sd)
 {
-#if KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE
-	return container_of(sd, struct vd55g1, sd);
-#else
 	return container_of_const(sd, struct vd55g1, sd);
-#endif
 }
 
 static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
 {
-	return &container_of(ctrl->handler, struct vd55g1,
+	return &container_of_const(ctrl->handler, struct vd55g1,
 		ctrl_handler)->sd;
 }
 
@@ -391,8 +414,20 @@ static u8 get_data_type_by_code(__u32 code)
 
 static s32 get_pixel_rate(struct vd55g1 *sensor)
 {
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
+#elif KERNEL_LACKS_STREAMS
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_mbus_framefmt *format = v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_mbus_framefmt *format = v4l2_subdev_state_get_format(state, 0);
+#endif
+
 	return div64_u64((u64)sensor->data_rate_in_mbps,
-			 get_bpp_by_code(sensor->active_fmt.code));
+			 get_bpp_by_code(format->code));
 }
 
 static s32 get_min_line_length(struct vd55g1 *sensor)
@@ -400,12 +435,26 @@ static s32 get_min_line_length(struct vd55g1 *sensor)
 	u32 mipi_req_line_time;
 	u32 mipi_req_line_length;
 	u32 min_line_length;
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+	const struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
+#elif KERNEL_LACKS_STREAMS
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	const struct v4l2_mbus_framefmt *format = v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(&sensor->sd, state, 0);
+	const struct v4l2_mbus_framefmt *format = v4l2_subdev_state_get_format(state, 0);
+#endif
 
 	/* MIPI required time */
-	mipi_req_line_time = (sensor->active_crop.width *
-			       get_bpp_by_code(sensor->active_fmt.code) +
-			       VD55G1_MIPI_MARGIN) /
-			       (sensor->data_rate_in_mbps / MEGA);
+	mipi_req_line_time = (crop->width *
+			      get_bpp_by_code(format->code) +
+			      VD55G1_MIPI_MARGIN) /
+			      (sensor->data_rate_in_mbps / MEGA);
 	mipi_req_line_length = mipi_req_line_time * sensor->pixel_clock /
 			       HZ_PER_MHZ;
 
@@ -421,10 +470,20 @@ static s32 get_min_line_length(struct vd55g1 *sensor)
 static struct hblank_limits get_hblank_limits(struct vd55g1 *sensor)
 {
 	struct hblank_limits limits;
-	struct v4l2_rect crop = sensor->active_crop;
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+#elif KERNEL_LACKS_STREAMS
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+#endif
 
-	limits.min = get_min_line_length(sensor) - crop.width;
-	limits.max = VD55G1_LINE_LENGTH_MAX - crop.width;
+	limits.min = get_min_line_length(sensor) - crop->width;
+	limits.max = VD55G1_LINE_LENGTH_MAX - crop->width;
 
 	return limits;
 }
@@ -432,16 +491,26 @@ static struct hblank_limits get_hblank_limits(struct vd55g1 *sensor)
 static struct vblank_limits get_vblank_limits(struct vd55g1 *sensor)
 {
 	struct vblank_limits limits;
-	struct v4l2_rect crop = sensor->active_crop;
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+#elif KERNEL_LACKS_STREAMS
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+#endif
 
 	limits.min = VD55G1_VBLANK_MIN;
-	limits.def = VD55G1_FRAME_LENGTH_DEF - crop.height;
-	limits.max = VD55G1_VBLANK_MAX - crop.height;
+	limits.def = VD55G1_FRAME_LENGTH_DEF - crop->height;
+	limits.max = VD55G1_VBLANK_MAX - crop->height;
 
 	return limits;
 }
 
-#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_CCI
 static int vd55g1_read(struct vd55g1 *sensor, u32 reg, u32 *val, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -836,14 +905,25 @@ static int vd55g1_apply_reset(struct vd55g1 *sensor)
 
 static int vd55g1_apply_cold_start(struct vd55g1 *sensor)
 {
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+#elif KERNEL_LACKS_STREAMS
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+#endif
+
 	/*
 	 * Cold start register is a single register expressed as exposure time
 	 * in us. This differ from status registers being a combination of
 	 * exposure, digital gain, and analog gain, requiring the following
 	 * format conversion.
 	 */
-	unsigned int line_length = sensor->active_crop.width +
-				   sensor->hblank_ctrl->val;
+	unsigned int line_length = crop->width + sensor->hblank_ctrl->val;
 	unsigned int line_time_us = DIV_ROUND_UP(line_length * MEGA,
 						 sensor->pixel_clock);
 	u8 d_gain = DIV_ROUND_CLOSEST(sensor->dgain_ctrl->val, 1 << 8);
@@ -915,18 +995,31 @@ static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 	return ret;
 }
 
-static int vd55g1_set_framefmt(struct vd55g1 *sensor)
+static int vd55g1_set_framefmt(struct vd55g1 *sensor) //TODO remove ?
 {
+#if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
+	const struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
+#elif KERNEL_LACKS_STREAMS
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	const struct v4l2_mbus_framefmt *format = v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(&sensor->sd, state, 0);
+	const struct v4l2_mbus_framefmt *format = v4l2_subdev_state_get_format(state, 0);
+#endif
 	enum vd55g1_bin_mode binning;
 	int ret = 0;
 
 	vd55g1_write(sensor, VD55G1_REG_FORMAT_CTRL,
-		     get_bpp_by_code(sensor->active_fmt.code), &ret);
+		     get_bpp_by_code(format->code), &ret);
 	vd55g1_write(sensor, VD55G1_REG_OIF_IMG_CTRL,
-		     get_data_type_by_code(sensor->active_fmt.code), &ret);
+		     get_data_type_by_code(format->code), &ret);
 
-	switch (crop->width / sensor->active_fmt.width) {
+	switch (crop->width / format->width) {
 	case 1:
 	default:
 		binning = VD55G1_BIN_MODE_NORMAL;
@@ -1119,9 +1212,11 @@ static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
 	if (!ret)
 		sensor->streaming = enable;
 
-#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_LOCKED_GRAB
 unlock:
+#if KERNEL_LACKS_ACTIVE_STATES
 	mutex_unlock(&sensor->lock);
+#endif
 
 	if (!ret) {
 		/* These settings cannot change during streaming */
@@ -1145,13 +1240,15 @@ unlock:
 	}
 
 unlock:
+#if KERNEL_LACKS_ACTIVE_STATES
 	mutex_unlock(&sensor->lock);
+#endif
 #endif
 
 	return ret;
 }
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_SUBDEV_STATES
 static int vd55g1_get_selection(struct v4l2_subdev *sd,
 				struct v4l2_subdev_pad_config *cfg,
 				struct v4l2_subdev_selection *sel)
@@ -1162,10 +1259,21 @@ static int vd55g1_get_selection(struct v4l2_subdev *sd,
 #endif
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+#elif KERNEL_LACKS_STREAMS
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+#endif
 
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP:
-		sel->r = sensor->active_crop;
+		sel->r = *crop;
 		return 0;
 	case V4L2_SEL_TGT_NATIVE_SIZE:
 	case V4L2_SEL_TGT_CROP_DEFAULT:
@@ -1180,7 +1288,7 @@ static int vd55g1_get_selection(struct v4l2_subdev *sd,
 	return -EINVAL;
 }
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_SUBDEV_STATES
 static int vd55g1_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_pad_config *cfg,
 				 struct v4l2_subdev_mbus_code_enum *code)
@@ -1198,7 +1306,8 @@ static int vd55g1_enum_mbus_code(struct v4l2_subdev *sd,
 	return 0;
 }
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_ACTIVE_STATES
+#if KERNEL_LACKS_SUBDEV_STATES
 static int vd55g1_get_pad_fmt(struct v4l2_subdev *sd,
 			      struct v4l2_subdev_pad_config *cfg,
 			      struct v4l2_subdev_format *sd_fmt)
@@ -1214,14 +1323,11 @@ static int vd55g1_get_pad_fmt(struct v4l2_subdev *sd,
 	mutex_lock(&sensor->lock);
 
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY)
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_SUBDEV_STATES
 		pad_fmt = v4l2_subdev_get_try_format(&sensor->sd, cfg,
 						     sd_fmt->pad);
-#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
-		pad_fmt = v4l2_subdev_get_try_format(&sensor->sd, sd_state,
-						     sd_fmt->pad);
 #else
-		pad_fmt = v4l2_subdev_get_pad_format(&sensor->sd, sd_state,
+		pad_fmt = v4l2_subdev_get_try_format(&sensor->sd, sd_state,
 						     sd_fmt->pad);
 #endif
 	else
@@ -1233,8 +1339,45 @@ static int vd55g1_get_pad_fmt(struct v4l2_subdev *sd,
 
 	return 0;
 }
+#endif
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+void vd55g1_new_format_change_controls(struct vd55g1 *sensor)
+{
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+#elif KERNEL_LACKS_STREAMS
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+#endif
+	struct hblank_limits hblank;
+	struct vblank_limits vblank;
+	unsigned int frame_length = 0;
+	unsigned int expo_max;
+
+	/* Reset vblank and frame length to default */
+	vblank = get_vblank_limits(sensor);
+	__v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank.min,
+				 vblank.max, 1, vblank.def);
+	/* Max exposure changes with vblank */
+	frame_length = crop->height + sensor->vblank_ctrl->val;
+	expo_max = frame_length - VD55G1_EXPO_MAX_TERM;
+	__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
+				 VD55G1_EXPO_DEF);
+	/* Update pixel rate to reflect new bpp */
+	__v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
+				 get_pixel_rate(sensor));
+	/* Update hblank according to new width */
+	hblank = get_hblank_limits(sensor);
+	__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank.min,
+				 hblank.max, 1, hblank.min);
+}
+
+#if KERNEL_LACKS_SUBDEV_STATES
 static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 			      struct v4l2_subdev_pad_config *cfg,
 			      struct v4l2_subdev_format *sd_fmt)
@@ -1250,15 +1393,13 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *format;
 	struct v4l2_rect pad_crop;
 	unsigned int binning;
-	struct hblank_limits hblank;
-	struct vblank_limits vblank;
-	unsigned int frame_length = 0;
-	unsigned int expo_max;
 
 	if (sensor->streaming)
 		return -EBUSY;
 
+#if KERNEL_LACKS_ACTIVE_STATES
 	mutex_lock(&sensor->lock);
+#endif
 
 	new_mode = v4l2_find_nearest_size(vd55g1_supported_modes,
 					  ARRAY_SIZE(vd55g1_supported_modes),
@@ -1280,45 +1421,52 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	pad_crop.left = (VD55G1_WIDTH - pad_crop.width) / 2;
 	pad_crop.top = (VD55G1_HEIGHT - pad_crop.height) / 2;
 
+#if KERNEL_LACKS_ACTIVE_STATES
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_SUBDEV_STATES
 		format = v4l2_subdev_get_try_format(sd, cfg, sd_fmt->pad);
-#elif KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE
-		format = v4l2_subdev_get_try_format(sd, sd_state, sd_fmt->pad);
 #else
-		format = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
+		format = v4l2_subdev_get_try_format(sd, sd_state, sd_fmt->pad);
 #endif
 		*format = sd_fmt->format;
 	}
 	else {
-		//TODO remove once active state is ready
 		sensor->active_fmt = sd_fmt->format;
 		sensor->active_crop = pad_crop;
-		/* Reset vblank and frame length to default */
-		vblank = get_vblank_limits(sensor);
-		__v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank.min,
-					 vblank.max, 1, vblank.def);
-		/* Max exposure changes with vblank */
-		frame_length = sensor->active_crop.height +
-			       sensor->vblank_ctrl->val;
-		expo_max = frame_length - VD55G1_EXPO_MAX_TERM;
-		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
-					 VD55G1_EXPO_DEF);
-		/* Update pixel rate to reflect new bpp */
-		__v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
-					 get_pixel_rate(sensor));
-		/* Update hblank according to new width */
-		hblank = get_hblank_limits(sensor);
-		__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank.min,
-					 hblank.max, 1, hblank.min);
+		vd55g1_new_format_change_controls(sensor);
 	}
 
 	mutex_unlock(&sensor->lock);
+#else
+#if KERNEL_LACKS_STREAMS
+	format = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
+#else
+	format = v4l2_subdev_state_get_format(sd_state, sd_fmt->pad);
+#endif
+
+	/* Avoid to reset ctrls while format hasn't changed */
+	if (sd_fmt->format.width == format->width &&
+	    sd_fmt->format.height == format->height &&
+	    sd_fmt->format.code == format->code &&
+	    sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
+		return 0;
+
+	/* Update active state's format and crop */
+	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
+		vd55g1_new_format_change_controls(sensor);
+
+	*format = sd_fmt->format;
+#if KERNEL_LACKS_STREAMS
+	*v4l2_subdev_get_pad_crop(sd, sd_state, sd_fmt->pad) = pad_crop;
+#else
+	*v4l2_subdev_state_get_crop(sd_state, sd_fmt->pad) = pad_crop;
+#endif
+#endif
 
 	return 0;
 }
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_SUBDEV_STATES
 static int vd55g1_init_cfg(struct v4l2_subdev *sd,
 			   struct v4l2_subdev_pad_config *cfg)
 #else
@@ -1333,14 +1481,14 @@ static int vd55g1_init_cfg(struct v4l2_subdev *sd,
 	vd55g1_update_img_pad_format(sensor, &vd55g1_supported_modes[def_mode],
 				     VD55G1_MEDIA_BUS_FMT_DEF, &fmt.format);
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_SUBDEV_STATES
 	return vd55g1_set_pad_fmt(sd, cfg, &fmt);
 #else
 	return vd55g1_set_pad_fmt(sd, sd_state, &fmt);
 #endif
 }
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_SUBDEV_STATES
 static int vd55g1_enum_frame_size(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_pad_config *cfg,
 				  struct v4l2_subdev_frame_size_enum *fse)
@@ -1373,7 +1521,11 @@ static const struct v4l2_subdev_video_ops vd55g1_video_ops = {
 static const struct v4l2_subdev_pad_ops vd55g1_pad_ops = {
 	.init_cfg = vd55g1_init_cfg,
 	.enum_mbus_code = vd55g1_enum_mbus_code,
+#if KERNEL_LACKS_ACTIVE_STATES
 	.get_fmt = vd55g1_get_pad_fmt,
+#else
+	.get_fmt = v4l2_subdev_get_fmt,
+#endif
 	.set_fmt = vd55g1_set_pad_fmt,
 	.get_selection = vd55g1_get_selection,
 	.enum_frame_size = vd55g1_enum_frame_size,
@@ -1431,6 +1583,17 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	unsigned int expo_max;
 	struct hblank_limits hblank = get_hblank_limits(sensor);
 	bool is_auto = false;
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+#elif KERNEL_LACKS_STREAMS
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+#endif
 	int ret;
 
 	vd55g1_read_expo_cluster(sensor, true);
@@ -1441,14 +1604,14 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	/* Update controls state, range, etc. whatever the state of the HW */
 	switch (ctrl->id) {
 	case V4L2_CID_VBLANK:
-		frame_length = sensor->active_crop.height + ctrl->val;
+		frame_length = crop->height + ctrl->val;
 		expo_max = frame_length - VD55G1_EXPO_MAX_TERM;
 		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
 					 VD55G1_EXPO_DEF);
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
 		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
-#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_LOCKED_GRAB
 		mutex_unlock(&sensor->lock);
 		v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
 		v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
@@ -1521,7 +1684,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_HBLANK:
 		ret =  vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH,
-				    sensor->active_crop.width + ctrl->val,
+				    crop->width + ctrl->val,
 				    NULL);
 		break;
 	default:
@@ -1594,8 +1757,10 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	int ret;
 
 	v4l2_ctrl_handler_init(hdl, 16);
+#if KERNEL_LACKS_ACTIVE_STATES
 	/* we can use our own mutex for the ctrl lock */
 	hdl->lock = &sensor->lock;
+#endif
 
 	/* Flip cluster */
 	sensor->hflip_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP,
@@ -1796,7 +1961,7 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 				 struct fwnode_handle *endpoint)
 {
 	struct i2c_client *client = sensor->i2c_client;
-#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_NEW_EP_ALLOC
 	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2 };
 #else
 	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2_DPHY };
@@ -1804,7 +1969,7 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 	u8 n_lanes;
 	int ret = 0;
 
-#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_NEW_EP_ALLOC
 	struct v4l2_fwnode_endpoint *ep_ptr =
 		v4l2_fwnode_endpoint_alloc_parse(endpoint);
 	if (IS_ERR(ep_ptr))
@@ -1851,7 +2016,7 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 	link_freq[0] = ep.link_frequencies[0];
 
 done:
-#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_NEW_EP_ALLOC
 	v4l2_fwnode_endpoint_free(ep_ptr);
 #else
 	v4l2_fwnode_endpoint_free(&ep);
@@ -1986,10 +2151,14 @@ static int vd55g1_parse_dt(struct vd55g1 *sensor)
 static int vd55g1_subdev_init(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
+#if KERNEL_LACKS_ACTIVE_STATES
 	unsigned int def_mode = VD55G1_DEFAULT_MODE;
+#endif
 	int ret;
 
+#if KERNEL_LACKS_ACTIVE_STATES
 	mutex_init(&sensor->lock);
+#endif
 
 	/* Init sub device */
 	v4l2_i2c_subdev_init(&sensor->sd, client, &vd55g1_subdev_ops);
@@ -2007,6 +2176,7 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 
 	/* Init vd56g3 struct : default resolution + raw8 */
 	sensor->streaming = false;
+#if KERNEL_LACKS_ACTIVE_STATES
 	vd55g1_update_img_pad_format(sensor, &vd55g1_supported_modes[def_mode],
 				     VD55G1_MEDIA_BUS_FMT_DEF,
 				     &sensor->active_fmt);
@@ -2014,6 +2184,14 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	sensor->active_crop.height = vd55g1_supported_modes[def_mode].height;
 	sensor->active_crop.left = 2;
 	sensor->active_crop.top = 2;
+#else
+	sensor->sd.state_lock = sensor->ctrl_handler.lock;
+	ret = v4l2_subdev_init_finalize(&sensor->sd);
+	if (ret) {
+		dev_err(&client->dev, "subdev init error: %d", ret);
+		goto err_ctrls;
+	}
+#endif
 
 	/*
 	 * Initiliaze controls after update_img_pad_format to make sure default
@@ -2025,6 +2203,11 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 		goto err_media;
 	}
 
+#if !KERNEL_LACKS_ACTIVE_STATES
+err_ctrls:
+	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
+#endif
+
 err_media:
 	media_entity_cleanup(&sensor->sd.entity);
 	return ret;
@@ -2033,7 +2216,11 @@ err_media:
 static void vd55g1_subdev_cleanup(struct vd55g1 *sensor)
 {
 	v4l2_async_unregister_subdev(&sensor->sd);
+#if KERNEL_LACKS_ACTIVE_STATES
 	mutex_destroy(&sensor->lock);
+#else
+	v4l2_subdev_cleanup(&sensor->sd);
+#endif
 	media_entity_cleanup(&sensor->sd.entity);
 	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
 }
@@ -2075,7 +2262,7 @@ static int vd55g1_probe(struct i2c_client *client)
 		return dev_err_probe(dev, PTR_ERR(sensor->reset_gpio),
 				     "Failed to get reset gpio.");
 
-#if KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_CCI
 	sensor->regmap = devm_regmap_init_i2c(client, &vd55g1_regmap_config);
 #else
 	sensor->regmap = devm_cci_regmap_init_i2c(client, 16);
@@ -2120,7 +2307,7 @@ err_power_off:
 	return ret;
 }
 
-#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_REMOVE_INT_RETURN
 static int vd55g1_remove(struct i2c_client *client)
 #else
 static void vd55g1_remove(struct i2c_client *client)
@@ -2135,7 +2322,7 @@ static void vd55g1_remove(struct i2c_client *client)
 	if (!pm_runtime_status_suspended(&client->dev))
 		vd55g1_power_off(sensor);
 	pm_runtime_set_suspended(&client->dev);
-#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_REMOVE_INT_RETURN
 	return 0;
 #endif
 }
