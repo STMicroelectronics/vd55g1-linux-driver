@@ -2203,6 +2203,8 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 		goto err_media;
 	}
 
+	return ret;
+
 #if !KERNEL_LACKS_ACTIVE_STATES
 err_ctrls:
 	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
