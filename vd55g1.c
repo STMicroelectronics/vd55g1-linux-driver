@@ -288,6 +288,7 @@ static const struct regmap_config vd55g1_regmap_config = {
 };
 #endif
 
+//TODO struct v4l2_rect like crop ?
 static const struct vd55g1_mode vd55g1_supported_modes[] = {
 	{
 		.width = VD55G1_WIDTH,
@@ -2175,8 +2176,8 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 				     &sensor->active_fmt);
 	sensor->active_crop.width = vd55g1_supported_modes[def_mode].width;
 	sensor->active_crop.height = vd55g1_supported_modes[def_mode].height;
-	sensor->active_crop.left = 2;
-	sensor->active_crop.top = 2;
+	sensor->active_crop.left = 0;
+	sensor->active_crop.top = 0;
 #else
 	sensor->sd.state_lock = sensor->ctrl_handler.lock;
 	ret = v4l2_subdev_init_finalize(&sensor->sd);
