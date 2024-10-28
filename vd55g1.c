@@ -1185,7 +1185,18 @@ static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
+#if KERNEL_LACKS_ACTIVE_STATES
+#else
+	struct v4l2_subdev_state *state;
+#endif
 	int ret = 0;
+
+#if KERNEL_LACKS_ACTIVE_STATES
+	mutex_lock(&sensor->lock);
+#else
+	state = v4l2_subdev_lock_and_get_active_state(sd);
+#endif
+
 
 	if (enable) {
 #if KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE
@@ -1243,6 +1254,8 @@ unlock:
 unlock:
 #if KERNEL_LACKS_ACTIVE_STATES
 	mutex_unlock(&sensor->lock);
+#else
+	v4l2_subdev_unlock_state(state);
 #endif
 #endif
 
