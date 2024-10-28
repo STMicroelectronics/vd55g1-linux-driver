@@ -1276,13 +1276,9 @@ static int vd55g1_get_selection(struct v4l2_subdev *sd,
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
 #elif KERNEL_LACKS_STREAMS
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(sd, sd_state, 0);
 #else
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(sd_state, 0);
 #endif
 
 	switch (sel->target) {
