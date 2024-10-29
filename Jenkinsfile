@@ -5,6 +5,7 @@ pipeline {
 	environment {
 		http_proxy = credentials('proxy')
 		https_proxy = credentials('proxy')
+		headers = sh(script: 'find /usr/src/ -name linux-headers-* | sort | tail -1', returnStdout: true).trim()
 	}
 	options {
 		skipDefaultCheckout()
@@ -37,11 +38,8 @@ pipeline {
 		}
 		stage('Check') {
 			steps {
-				sh 'git clone https://git.linuxtv.org/media_tree.git --depth 1 -b master || true' // if already cloned
-				dir('media_tree') {
-					sh 'git fetch --depth 1'
-					sh 'git reset --hard origin/master'
-					sh 'find ../pristine/ -name "*.c" -not -name "*mod.c" -not -path "*debian*" -print0 | xargs -0 scripts/checkpatch.pl --max-line-length=80 --strict --ignore=LINUX_VERSION_CODE --ignore=UNDOCUMENTED_DT_STRING -f'
+				dir('pristine') {
+					sh 'find -name "*.c" -not -name "*mod.c" -not -path "*debian*" -print0 | xargs -0 ${headers}/scripts/checkpatch.pl --no-tree --max-line-length=80 --strict --ignore=LINUX_VERSION_CODE --ignore=UNDOCUMENTED_DT_STRING -f'
 				}
 			}
 		}
