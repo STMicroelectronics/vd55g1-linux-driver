@@ -1599,8 +1599,6 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 #endif
 	int ret;
 
-	vd55g1_read_expo_cluster(sensor, true);
-
 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
 		return 0;
 
