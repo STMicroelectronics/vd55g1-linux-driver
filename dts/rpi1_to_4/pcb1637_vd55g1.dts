@@ -66,7 +66,7 @@
 						remote-endpoint = <&csi_ep>;
 						clock-noncontinuous;
 						link-frequencies =
-							/bits/ 64 <1200000000>;
+							/bits/ 64 <600000000>;
 					};
 				};
 			};

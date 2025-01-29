@@ -674,7 +674,8 @@ static int vd55g1_get_regulators(struct vd55g1 *sensor)
 static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	u64 mipi_freq = link_freq[0];
+	/* Double data rate */
+	u64 mipi_freq = link_freq[0] * 2;
 	u32 sys_clk, mipi_div, pixel_div;
 	int ret = 0;
 
