@@ -1273,8 +1273,8 @@ static int vd55g1_get_selection(struct v4l2_subdev *sd,
 				struct v4l2_subdev_selection *sel)
 #endif
 {
-	struct vd55g1 *sensor = to_vd55g1(sd);
 #if KERNEL_LACKS_ACTIVE_STATES
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	const struct v4l2_rect *crop = &sensor->active_crop;
 #elif KERNEL_LACKS_STREAMS
 	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(sd, sd_state, 0);
@@ -1455,16 +1455,15 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	format = v4l2_subdev_state_get_format(sd_state, sd_fmt->pad);
 #endif
 
-	/* Update active state's format and crop */
-	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		vd55g1_new_format_change_controls(sensor);
-
 	*format = sd_fmt->format;
+
 #if KERNEL_LACKS_STREAMS
 	*v4l2_subdev_get_pad_crop(sd, sd_state, sd_fmt->pad) = pad_crop;
 #else
 	*v4l2_subdev_state_get_crop(sd_state, sd_fmt->pad) = pad_crop;
 #endif
+	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
+		vd55g1_new_format_change_controls(sensor);
 #endif
 
 	return 0;
