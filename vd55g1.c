@@ -1467,11 +1467,6 @@ static int vd55g1_set_fmt(struct v4l2_subdev *sd,
 
 	mutex_lock(&sensor->lock);
 
-	if (sensor->streaming) {
-		ret = -EBUSY;
-		goto out;
-	}
-
 	ret = vd55g1_try_fmt_internal(sd, &format->format, &new_mode);
 	if (ret)
 		goto out;
