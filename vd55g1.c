@@ -1405,9 +1405,6 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	struct v4l2_rect pad_crop;
 	unsigned int binning;
 
-	if (sensor->streaming)
-		return -EBUSY;
-
 #if KERNEL_LACKS_ACTIVE_STATES
 	mutex_lock(&sensor->lock);
 #endif
