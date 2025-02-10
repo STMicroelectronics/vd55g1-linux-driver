@@ -216,7 +216,7 @@ static const s64 vd55g1_ev_bias_menu[] = {
 	  500,  1000,  1500,  2000,  2500, 3000,
 };
 
-static const char * const vd55g1_hdr_mode_menu[] = {
+static const char * const vd55g1_hdr_menu[] = {
 	"No HDR",
 	/*
 	 * This mode acquires 2 frames on the sensor, the first one is ditched
@@ -288,7 +288,6 @@ static const struct regmap_config vd55g1_regmap_config = {
 };
 #endif
 
-//TODO struct v4l2_rect like crop ?
 static const struct vd55g1_mode vd55g1_supported_modes[] = {
 	{
 		.width = VD55G1_WIDTH,
@@ -859,7 +858,7 @@ static int vd55g1_read_expo_cluster(struct vd55g1 *sensor, bool force_cur_val)
 	sensor->dgain_ctrl->cur.val = dgain;
 
 	if (ret)
-		return -EINVAL; //TODO better
+		return -EIO;
 	return ret;
 }
 
@@ -997,7 +996,7 @@ static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 	return ret;
 }
 
-static int vd55g1_set_framefmt(struct vd55g1 *sensor) //TODO remove ?
+static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 {
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
@@ -1045,8 +1044,7 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor) //TODO remove ?
 	return ret;
 }
 
-//TODO rename update_gpio
-static int vd55g1_write_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
+static int vd55g1_update_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
 {
 	unsigned long io;
 	u32 gpio_val;
@@ -1100,7 +1098,7 @@ static int vd55g1_stream_on(struct vd55g1 *sensor)
 		goto err_rpm_put;
 
 	/* Setup default GPIO values; could be overridden by V4L2 ctrl setup */
-	ret = vd55g1_write_gpios(sensor, GENMASK(VD55G1_NB_GPIOS - 1, 0));
+	ret = vd55g1_update_gpios(sensor, GENMASK(VD55G1_NB_GPIOS - 1, 0));
 	if (ret)
 		return ret;
 
@@ -1181,7 +1179,6 @@ static int vd55g1_patch(struct vd55g1 *sensor)
 	return 0;
 }
 
-//TODO move to new API
 static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
@@ -1663,7 +1660,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		ret = vd55g1_update_frame_length(sensor, frame_length);
 		break;
 	case V4L2_CID_SLAVE_MODE:
-		ret = vd55g1_write_gpios(sensor, VD55G1_VTSLAVE_GPIO);
+		ret = vd55g1_update_gpios(sensor, VD55G1_VTSLAVE_GPIO);
 		if (ret)
 			break;
 		ret = vd55g1_write(sensor, VD55G1_REG_VT_CTRL, ctrl->val, &ret);
@@ -1675,7 +1672,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 			     &ret);
 		break;
 	case V4L2_CID_FLASH_LED_MODE:
-		ret = vd55g1_write_gpios(sensor, sensor->ext_leds_mask);
+		ret = vd55g1_update_gpios(sensor, sensor->ext_leds_mask);
 		break;
 	case V4L2_CID_HDR_SENSOR_MODE:
 		ret = vd55g1_update_hdr_mode(sensor);
@@ -1733,17 +1730,18 @@ static const struct v4l2_ctrl_config vd55g1_slave_ctrl = {
 	.def		= 1,
 };
 
-//TODO use standard control if available
+#if KERNEL_LACKS_HDR_CTRL
 static const struct v4l2_ctrl_config vd55g1_hdr_ctrl = {
 	.ops		= &vd55g1_ctrl_ops,
 	.id		= V4L2_CID_HDR_SENSOR_MODE,
 	.name		= "HDR Sensor Mode",
 	.type		= V4L2_CTRL_TYPE_MENU,
 	.min		= 0,
-	.max		= ARRAY_SIZE(vd55g1_hdr_mode_menu) - 1,
+	.max		= ARRAY_SIZE(vd55g1_hdr_menu) - 1,
 	.def		= VD55G1_NO_HDR,
-	.qmenu		= vd55g1_hdr_mode_menu,
+	.qmenu		= vd55g1_hdr_menu,
 };
+#endif
 
 static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 {
@@ -1773,7 +1771,6 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 						 ~0x3, V4L2_EXPOSURE_AUTO);
 	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN,
 					       0, 0x1c, 1, VD55G1_AGAIN_DEF);
-	//TODO only integer part?
 	sensor->dgain_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN,
 					       256, 0xffff, 1,
 					       VD55G1_DGAIN_DEF);
@@ -1805,7 +1802,15 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 				       ARRAY_SIZE(vd55g1_ev_bias_menu) - 1,
 				       ARRAY_SIZE(vd55g1_ev_bias_menu) / 2,
 				       vd55g1_ev_bias_menu);
+	#if KERNEL_LACKS_HDR_CTRL
 	sensor->hdr_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_hdr_ctrl, NULL);
+	#else
+	sensor->hdr_ctrl =
+		v4l2_ctrl_new_std_menu_items(hdl, ops,
+					     V4L2_CID_HDR_SENSOR_MODE,
+					     ARRAY_SIZE(vd55g1_hdr_menu) - 1, 0,
+					     VD55G1_NO_HDR, vd55g1_hdr_menu);
+	#endif
 	hblank = get_hblank_limits(sensor);
 	sensor->hblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
 						hblank.min, hblank.max, 1,
@@ -2005,7 +2010,6 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 		ret = -EINVAL;
 		goto done;
 	}
-	//TODO support multiple link freq
 	if (ep.nr_of_link_frequencies != 1) {
 		dev_err(&client->dev, "Multiple link frequencies not supported\n");
 		ret = -EINVAL;
