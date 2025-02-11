@@ -368,6 +368,7 @@ struct vd55g1 {
 	struct v4l2_ctrl *hdr_ctrl;
 	bool streaming;
 #if KERNEL_LACKS_ACTIVE_STATES
+	/* Mutex for serialized access */
 	struct mutex lock;
 	struct v4l2_mbus_framefmt active_fmt;
 	struct v4l2_rect active_crop;
@@ -419,11 +420,13 @@ static s32 get_pixel_rate(struct vd55g1 *sensor)
 #elif KERNEL_LACKS_STREAMS
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_mbus_framefmt *format = v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
 #else
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_mbus_framefmt *format = v4l2_subdev_state_get_format(state, 0);
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_state_get_format(state, 0);
 #endif
 
 	return div64_u64((u64)sensor->data_rate_in_mbps,
@@ -441,13 +444,17 @@ static s32 get_min_line_length(struct vd55g1 *sensor)
 #elif KERNEL_LACKS_STREAMS
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
-	const struct v4l2_mbus_framefmt *format = v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
 #else
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(&sensor->sd, state, 0);
-	const struct v4l2_mbus_framefmt *format = v4l2_subdev_state_get_format(state, 0);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_state_get_crop(&sensor->sd, state, 0);
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_state_get_format(state, 0);
 #endif
 
 	/* MIPI required time */
@@ -475,7 +482,8 @@ static struct hblank_limits get_hblank_limits(struct vd55g1 *sensor)
 #elif KERNEL_LACKS_STREAMS
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
 #else
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
@@ -496,7 +504,8 @@ static struct vblank_limits get_vblank_limits(struct vd55g1 *sensor)
 #elif KERNEL_LACKS_STREAMS
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
 #else
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
@@ -911,7 +920,8 @@ static int vd55g1_apply_cold_start(struct vd55g1 *sensor)
 #elif KERNEL_LACKS_STREAMS
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
 #else
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
@@ -1004,13 +1014,17 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 #elif KERNEL_LACKS_STREAMS
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
-	const struct v4l2_mbus_framefmt *format = v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
 #else
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(&sensor->sd, state, 0);
-	const struct v4l2_mbus_framefmt *format = v4l2_subdev_state_get_format(state, 0);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_state_get_crop(&sensor->sd, state, 0);
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_state_get_format(state, 0);
 #endif
 	enum vd55g1_bin_mode binning;
 	int ret = 0;
@@ -1195,7 +1209,6 @@ static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
 	state = v4l2_subdev_lock_and_get_active_state(sd);
 #endif
 
-
 	if (enable) {
 #if KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE
 		ret = pm_runtime_get_sync(&client->dev);
@@ -1274,7 +1287,8 @@ static int vd55g1_get_selection(struct v4l2_subdev *sd,
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	const struct v4l2_rect *crop = &sensor->active_crop;
 #elif KERNEL_LACKS_STREAMS
-	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(sd, sd_state, 0);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(sd, sd_state, 0);
 #else
 	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(sd_state, 0);
 #endif
@@ -1356,7 +1370,8 @@ void vd55g1_new_format_change_controls(struct vd55g1 *sensor)
 #elif KERNEL_LACKS_STREAMS
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
 #else
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
@@ -1395,7 +1410,6 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 			      struct v4l2_subdev_format *sd_fmt)
 #endif
 {
-
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	const struct vd55g1_mode *new_mode;
 	struct v4l2_mbus_framefmt *format;
@@ -1434,8 +1448,7 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 		format = v4l2_subdev_get_try_format(sd, sd_state, sd_fmt->pad);
 #endif
 		*format = sd_fmt->format;
-	}
-	else {
+	} else {
 		sensor->active_fmt = sd_fmt->format;
 		sensor->active_crop = pad_crop;
 		vd55g1_new_format_change_controls(sensor);
@@ -1585,7 +1598,8 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 #elif KERNEL_LACKS_STREAMS
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
 #else
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
