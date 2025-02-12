@@ -87,8 +87,7 @@
 #define VD55G1_REG_MODEL_ID				CCI_REG32_LE(0x0000)
 #define VD55G1_MODEL_ID					0x53354731
 #define VD55G1_REG_REVISION				CCI_REG16_LE(0x0004)
-#define VD55G1_REVISION_CUT_1				0x1010
-#define VD55G1_REVISION_CUT_2				0x2020
+#define VD55G1_REVISION_CCB				0x2020
 #define VD55G1_REG_FWPATCH_REVISION			CCI_REG16_LE(0x0012)
 #define VD55G1_REG_FWPATCH_START_ADDR			CCI_REG8(0x2000)
 #define VD55G1_REG_SYSTEM_FSM				CCI_REG8(0x001c)
@@ -1866,7 +1865,7 @@ free_ctrls:
 	return ret;
 }
 
-static int vd55g1_detect_cut_version(struct vd55g1 *sensor)
+static int vd55g1_check_sensor_revision(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	u32 device_rev;
@@ -1876,18 +1875,13 @@ static int vd55g1_detect_cut_version(struct vd55g1 *sensor)
 	if (ret)
 		return ret;
 
-	switch (device_rev) {
-	case VD55G1_REVISION_CUT_1:
-		dev_err(&client->dev, "Cut 1 is not supported\n");
-		return -ENODEV;
-	case VD55G1_REVISION_CUT_2:
-		dev_dbg(&client->dev, "Cut 2 detected\n");
-		return 0;
-	default:
-		dev_err(&client->dev, "Unable to detect cut version (0x%x)\n",
+	if (device_rev != VD55G1_REVISION_CCB) {
+		dev_err(&client->dev, "Unsupported sensor revision (0x%x)\n",
 			device_rev);
 		return -ENODEV;
 	}
+
+	return 0;
 }
 
 static int vd55g1_detect(struct vd55g1 *sensor)
@@ -1905,7 +1899,7 @@ static int vd55g1_detect(struct vd55g1 *sensor)
 		return -ENODEV;
 	}
 
-	ret = vd55g1_detect_cut_version(sensor);
+	ret = vd55g1_check_sensor_revision(sensor);
 	if (ret)
 		return ret;
 
