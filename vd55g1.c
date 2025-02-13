@@ -5,6 +5,9 @@
  * Copyright (C) 2024 STMicroelectronics SA
  */
 
+/* Backward compatibility */
+#include <linux/version.h>
+
 #include <linux/clk.h>
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
@@ -14,8 +17,11 @@
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
-
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
 #include <asm/unaligned.h>
+#else
+#include <linux/unaligned.h>
+#endif
 
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
@@ -24,13 +30,12 @@
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
-/* Backward compatibility */
-#include <linux/version.h>
-
 #define KERNEL_LACKS_CCI \
 	(KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_STREAMS \
 	(KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_INIT_STATE \
+	(KERNEL_VERSION(6, 7, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_HDR_CTRL \
 	(KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_REMOVE_INT_RETURN \
@@ -725,7 +730,7 @@ static s32 get_min_line_length(struct vd55g1 *sensor)
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_rect *crop =
-		v4l2_subdev_state_get_crop(&sensor->sd, state, 0);
+		v4l2_subdev_state_get_crop(state, 0);
 	const struct v4l2_mbus_framefmt *format =
 		v4l2_subdev_state_get_format(state, 0);
 #endif
@@ -1295,7 +1300,7 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_rect *crop =
-		v4l2_subdev_state_get_crop(&sensor->sd, state, 0);
+		v4l2_subdev_state_get_crop(state, 0);
 	const struct v4l2_mbus_framefmt *format =
 		v4l2_subdev_state_get_format(state, 0);
 #endif
@@ -1636,7 +1641,7 @@ static int vd55g1_get_pad_fmt(struct v4l2_subdev *sd,
 }
 #endif
 
-void vd55g1_new_format_change_controls(struct vd55g1 *sensor)
+static void vd55g1_new_format_change_controls(struct vd55g1 *sensor)
 {
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
@@ -1750,11 +1755,11 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 }
 
 #if KERNEL_LACKS_SUBDEV_STATES
-static int vd55g1_init_cfg(struct v4l2_subdev *sd,
-			   struct v4l2_subdev_pad_config *cfg)
+static int vd55g1_init_state(struct v4l2_subdev *sd,
+			     struct v4l2_subdev_pad_config *cfg)
 #else
-static int vd55g1_init_cfg(struct v4l2_subdev *sd,
-			   struct v4l2_subdev_state *sd_state)
+static int vd55g1_init_state(struct v4l2_subdev *sd,
+			     struct v4l2_subdev_state *sd_state)
 #endif
 {
 	unsigned int def_mode = VD55G1_DEFAULT_MODE;
@@ -1801,8 +1806,16 @@ static const struct v4l2_subdev_video_ops vd55g1_video_ops = {
 	.s_stream = vd55g1_s_stream,
 };
 
+#if !KERNEL_LACKS_INIT_STATE
+static const struct v4l2_subdev_internal_ops vd55g1_internal_ops = {
+	.init_state = vd55g1_init_state,
+};
+#endif
+
 static const struct v4l2_subdev_pad_ops vd55g1_pad_ops = {
-	.init_cfg = vd55g1_init_cfg,
+#if KERNEL_LACKS_INIT_STATE
+	.init_cfg = vd55g1_init_state,
+#endif
 	.enum_mbus_code = vd55g1_enum_mbus_code,
 #if KERNEL_LACKS_ACTIVE_STATES
 	.get_fmt = vd55g1_get_pad_fmt,
@@ -2448,6 +2461,9 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	v4l2_i2c_subdev_init(&sensor->sd, client, &vd55g1_subdev_ops);
 	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 	sensor->sd.entity.ops = &vd55g1_subdev_entity_ops;
+#if !KERNEL_LACKS_INIT_STATE
+	sensor->sd.internal_ops = &vd55g1_internal_ops;
+#endif
 
 	/* Init source pad */
 	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
