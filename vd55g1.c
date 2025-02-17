@@ -798,7 +798,7 @@ static struct vblank_limits get_vblank_limits(struct vd55g1 *sensor)
 }
 
 #if KERNEL_LACKS_CCI
-static int vd55g1_read(struct vd55g1 *sensor, u32 reg, u32 *val, int *err)
+static int vd55g1_read(struct vd55g1 *sensor, u32 reg, u64 *val, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	unsigned int len = (reg >> CCI_REG_WIDTH_SHIFT) & 7;
@@ -842,7 +842,7 @@ out:
 	return ret;
 }
 
-static int vd55g1_write(struct vd55g1 *sensor, u32 reg, u32 val, int *err)
+static int vd55g1_write(struct vd55g1 *sensor, u32 reg, u64 val, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	unsigned int len = (reg >> CCI_REG_WIDTH_SHIFT) & 7;
@@ -1082,7 +1082,7 @@ static int vd55g1_lock_exposure(struct vd55g1 *sensor, u32 lock_val)
 
 static int vd55g1_get_temp_stream_enable(struct vd55g1 *sensor, int *temp)
 {
-	u32 temperature;
+	u64 temperature;
 	int ret;
 
 	ret = vd55g1_read(sensor, VD55G1_REG_TEMPERATURE, &temperature, NULL);
@@ -1123,9 +1123,9 @@ static int vd55g1_get_temp(struct vd55g1 *sensor, int *temp)
 
 static int vd55g1_read_expo_cluster(struct vd55g1 *sensor, bool force_cur_val)
 {
-	int exposure = 0;
-	int again = 0;
-	int dgain = 0;
+	u64 exposure = 0;
+	u64 again = 0;
+	u64 dgain = 0;
 	int ret = 0;
 
 	/*
@@ -1437,7 +1437,7 @@ static int vd55g1_stream_off(struct vd55g1 *sensor)
 static int vd55g1_patch(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	u32 patch;
+	u64 patch;
 	int ret;
 
 	ret = vd55g1_write_array(sensor, VD55G1_REG_FWPATCH_START_ADDR,
@@ -1463,10 +1463,11 @@ static int vd55g1_patch(struct vd55g1 *sensor)
 		dev_err(&client->dev, "bad patch version expected %d.%d got %d.%d",
 			VD55G1_FWPATCH_REVISION_MAJOR,
 			VD55G1_FWPATCH_REVISION_MINOR,
-			patch >> 8, patch & 0xff);
+			(u8)(patch >> 8), (u8)(patch & 0xff));
 		return -ENODEV;
 	}
-	dev_dbg(&client->dev, "patch %d.%d applied", patch >> 8, patch & 0xff);
+	dev_dbg(&client->dev, "patch %d.%d applied",
+		(u8)(patch >> 8), (u8)(patch & 0xff));
 
 	return 0;
 }
@@ -2155,7 +2156,7 @@ free_ctrls:
 static int vd55g1_check_sensor_revision(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	u32 device_rev;
+	u64 device_rev;
 	int ret;
 
 	ret = vd55g1_read(sensor, VD55G1_REG_REVISION, &device_rev, NULL);
@@ -2164,7 +2165,7 @@ static int vd55g1_check_sensor_revision(struct vd55g1 *sensor)
 
 	if (device_rev != VD55G1_REVISION_CCB) {
 		dev_err(&client->dev, "Unsupported sensor revision (0x%x)\n",
-			device_rev);
+			(u16)device_rev);
 		return -ENODEV;
 	}
 
@@ -2174,7 +2175,7 @@ static int vd55g1_check_sensor_revision(struct vd55g1 *sensor)
 static int vd55g1_detect(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	u32 id;
+	u64 id;
 	int ret;
 
 	ret = vd55g1_read(sensor, VD55G1_REG_MODEL_ID, &id, NULL);
@@ -2182,7 +2183,7 @@ static int vd55g1_detect(struct vd55g1 *sensor)
 		return ret;
 
 	if (id != VD55G1_MODEL_ID) {
-		dev_warn(&client->dev, "Unsupported sensor id %x", id);
+		dev_warn(&client->dev, "Unsupported sensor id %x", (u32)id);
 		return -ENODEV;
 	}
 
