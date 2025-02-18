@@ -1460,7 +1460,7 @@ static int vd55g1_patch(struct vd55g1 *sensor)
 
 	if (patch != (VD55G1_FWPATCH_REVISION_MAJOR << 8) +
 	    VD55G1_FWPATCH_REVISION_MINOR) {
-		dev_err(&client->dev, "bad patch version expected %d.%d got %d.%d",
+		dev_err(&client->dev, "Bad patch version expected %d.%d got %d.%d",
 			VD55G1_FWPATCH_REVISION_MAJOR,
 			VD55G1_FWPATCH_REVISION_MINOR,
 			(u8)(patch >> 8), (u8)(patch & 0xff));
@@ -2203,33 +2203,33 @@ static int vd55g1_power_on(struct vd55g1 *sensor)
 	ret = regulator_bulk_enable(ARRAY_SIZE(vd55g1_supply_name),
 				    sensor->supplies);
 	if (ret) {
-		dev_err(&client->dev, "failed to enable regulators %d", ret);
+		dev_err(&client->dev, "Failed to enable regulators %d", ret);
 		return ret;
 	}
 
 	ret = clk_prepare_enable(sensor->xclk);
 	if (ret) {
-		dev_err(&client->dev, "failed to enable clock %d", ret);
+		dev_err(&client->dev, "Failed to enable clock %d", ret);
 		goto disable_bulk;
 	}
 
 	if (sensor->reset_gpio) {
 		ret = vd55g1_apply_reset(sensor);
 		if (ret) {
-			dev_err(&client->dev, "sensor reset failed %d\n", ret);
+			dev_err(&client->dev, "Sensor reset failed %d\n", ret);
 			goto disable_clock;
 		}
 	}
 
 	ret = vd55g1_detect(sensor);
 	if (ret) {
-		dev_err(&client->dev, "sensor detect failed %d", ret);
+		dev_err(&client->dev, "Sensor detect failed %d", ret);
 		goto disable_clock;
 	}
 
 	ret = vd55g1_patch(sensor);
 	if (ret) {
-		dev_err(&client->dev, "sensor patch failed %d", ret);
+		dev_err(&client->dev, "Sensor patch failed %d", ret);
 		goto disable_clock;
 	}
 
@@ -2291,7 +2291,7 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 
 	/* Clock lane must be first */
 	if (ep.bus.mipi_csi2.clock_lane != 0) {
-		dev_err(&client->dev, "Clk lane must be mapped to lane 0\n");
+		dev_err(&client->dev, "Clock lane must be mapped to lane 0\n");
 		ret = -EINVAL;
 		goto done;
 	}
@@ -2343,7 +2343,7 @@ static int vd55g1_parse_dt_gpios_array(struct vd55g1 *sensor,
 
 	for (i = 0; i < *nb;  i++) {
 		if (array[i] >= VD55G1_NB_GPIOS) {
-			dev_err(&client->dev, "invalid GPIO number %d\n",
+			dev_err(&client->dev, "Invalid GPIO number %d\n",
 				array[i]);
 			return -EINVAL;
 		}
@@ -2434,7 +2434,7 @@ static int vd55g1_parse_dt(struct vd55g1 *sensor)
 	endpoint = fwnode_graph_get_endpoint_by_id(dev_fwnode(dev), 0, 0, 0);
 #endif
 	if (!endpoint) {
-		dev_err(dev, "endpoint node not found\n");
+		dev_err(dev, "Endpoint node not found\n");
 		return -EINVAL;
 	}
 
@@ -2489,7 +2489,7 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	sensor->sd.state_lock = sensor->ctrl_handler.lock;
 	ret = v4l2_subdev_init_finalize(&sensor->sd);
 	if (ret) {
-		dev_err(&client->dev, "subdev init error: %d", ret);
+		dev_err(&client->dev, "Subdev init error: %d", ret);
 		goto err_ctrls;
 	}
 #endif
