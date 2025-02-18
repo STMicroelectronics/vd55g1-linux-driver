@@ -1892,7 +1892,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
 #endif
-	int ret;
+	int ret = -EINVAL;
 
 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
 		return 0;
@@ -1962,11 +1962,10 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_SLAVE_MODE:
 		ret = vd55g1_update_gpios(sensor, VD55G1_VTSLAVE_GPIO);
-		if (ret)
-			break;
-		ret = vd55g1_write(sensor, VD55G1_REG_VT_CTRL, ctrl->val, &ret);
+		vd55g1_write(sensor, VD55G1_REG_VT_CTRL, ctrl->val, &ret);
 		break;
 	case V4L2_CID_DARKCAL_PEDESTAL:
+		ret = 0;
 		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(0), ctrl->val,
 			     &ret);
 		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(1), ctrl->val,
