@@ -1796,11 +1796,6 @@ static int vd55g1_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static const struct v4l2_subdev_core_ops vd55g1_core_ops = {
-	.subscribe_event = v4l2_ctrl_subdev_subscribe_event,
-	.unsubscribe_event = v4l2_event_subdev_unsubscribe,
-};
-
 static const struct v4l2_subdev_video_ops vd55g1_video_ops = {
 	.s_stream = vd55g1_s_stream,
 };
@@ -1827,13 +1822,8 @@ static const struct v4l2_subdev_pad_ops vd55g1_pad_ops = {
 };
 
 static const struct v4l2_subdev_ops vd55g1_subdev_ops = {
-	.core = &vd55g1_core_ops,
 	.video = &vd55g1_video_ops,
 	.pad = &vd55g1_pad_ops,
-};
-
-static const struct media_entity_operations vd55g1_subdev_entity_ops = {
-	.link_validate = v4l2_subdev_link_validate,
 };
 
 static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
@@ -2458,7 +2448,6 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	/* Init sub device */
 	v4l2_i2c_subdev_init(&sensor->sd, client, &vd55g1_subdev_ops);
 	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	sensor->sd.entity.ops = &vd55g1_subdev_entity_ops;
 #if !KERNEL_LACKS_INIT_STATE
 	sensor->sd.internal_ops = &vd55g1_internal_ops;
 #endif
