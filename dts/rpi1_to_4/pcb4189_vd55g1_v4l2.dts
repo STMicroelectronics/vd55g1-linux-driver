@@ -59,6 +59,9 @@
 				reset-gpios = <&gpio 5 1>;
 				st,leds = <2>;
 
+				orientation = <2>;
+				rotation = <0>;
+
 				port {
 					wolfy_ep: endpoint {
 						clock-lanes = <0>;

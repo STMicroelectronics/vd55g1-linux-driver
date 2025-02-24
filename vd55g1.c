@@ -21,6 +21,8 @@
 	(KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_SUBDEV_STATES \
 	(KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_DEVICE_PROPERTIES \
+	(KERNEL_VERSION(5, 8, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_LOCKED_GRAB \
 	(KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_NEW_EP_ALLOC \
@@ -2026,6 +2028,9 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	const struct v4l2_ctrl_ops *ops = &vd55g1_ctrl_ops;
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
 	struct v4l2_ctrl *ctrl;
+#if !KERNEL_LACKS_DEVICE_PROPERTIES
+	struct v4l2_fwnode_device_properties fwnode_props;
+#endif
 	struct vblank_limits vblank;
 	unsigned int hblank;
 	int ret;
@@ -2122,6 +2127,16 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 		ret = hdl->error;
 		goto free_ctrls;
 	}
+
+#if !KERNEL_LACKS_DEVICE_PROPERTIES
+	ret = v4l2_fwnode_device_parse(&sensor->i2c_client->dev, &fwnode_props);
+	if (ret)
+		goto free_ctrls;
+
+	ret = v4l2_ctrl_new_fwnode_properties(hdl, ops, &fwnode_props);
+	if (ret)
+		goto free_ctrls;
+#endif
 
 	sensor->sd.ctrl_handler = hdl;
 	return 0;
