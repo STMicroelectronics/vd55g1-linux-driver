@@ -2667,4 +2667,4 @@ module_i2c_driver(vd55g1_i2c_driver);
 MODULE_AUTHOR("Benjamin Mugnier <benjamin.mugnier@foss.st.com>");
 MODULE_AUTHOR("Sylvain Petinot <sylvain.petinot@foss.st.com>");
 MODULE_DESCRIPTION("VD55G1 camera subdev driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");
