@@ -5,7 +5,6 @@ pipeline {
 	environment {
 		http_proxy = credentials('proxy')
 		https_proxy = credentials('proxy')
-		headers = sh(script: 'find /usr/src/ -name linux-headers-* | sort | tail -1', returnStdout: true).trim()
 	}
 	options {
 		skipDefaultCheckout()
@@ -39,7 +38,7 @@ pipeline {
 		stage('Check') {
 			steps {
 				dir('pristine') {
-					sh 'find -name "*.c" -not -name "*mod.c" -not -path "*debian*" -print0 | xargs -0 ${headers}/scripts/checkpatch.pl --no-tree --max-line-length=80 --strict --ignore=LINUX_VERSION_CODE --ignore=UNDOCUMENTED_DT_STRING -f'
+					sh 'find -name "*.c" -not -name "*mod.c" -not -path "*debian*" -print0 | xargs -0 /usr/src/linux-headers-$(ls /lib/modules/)/scripts/checkpatch.pl --no-tree --max-line-length=80 --strict --ignore=LINUX_VERSION_CODE --ignore=UNDOCUMENTED_DT_STRING -f'
 				}
 			}
 		}
