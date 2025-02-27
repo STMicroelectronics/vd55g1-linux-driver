@@ -868,7 +868,7 @@ out:
 }
 #else
 #define vd55g1_read(sensor, reg, val, err) \
-	cci_read((sensor)->regmap, reg, (u64 *)val, err)
+	cci_read((sensor)->regmap, reg, val, err)
 
 #define vd55g1_write(sensor, reg, val, err) \
 	cci_write((sensor)->regmap, reg, (u64)val, err)
