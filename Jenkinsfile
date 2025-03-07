@@ -43,70 +43,30 @@ pipeline {
 			}
 		}
 		stage('Package') {
-			when { anyOf {
-				environment name: 'BRANCH_NAME', value: 'master';
+			when {
 				environment name: 'BRANCH_NAME', value: 'debian'
-			}}
+			}
 			steps {
 				dir('pristine') {
-					dir('debianizer') {
-						git credentialsId: 'af76724f-9593-4f6c-a5cc-1548eb8b0e14',
-							url: 'ssh://gitolite@codex.cro.st.com/img-application-sw-linux/debianizer.git'
-					}
 					script {
-						if (env.BRANCH_NAME == 'debian') {
-							sh 'debianizer/debianizer.sh --zip'
-						} else {
-							sh 'debianizer/debianizer.sh --use-origin --snapshot --zip'
-						}
+						sh 'dpkg-buildpackage -us -uc -b'
+						sh 'lintian || true'
 					}
 				}
-			}
-		}
-		stage('Upload') {
-			when { anyOf {
-				environment name: 'BRANCH_NAME', value: 'master';
-				environment name: 'BRANCH_NAME', value: 'debian'
-			}}
-			steps {
 				script {
-					if (env.BRANCH_NAME == 'debian') {
-						rtUpload (
-							serverId: 'artifactory-azure',
-							spec: '''{
-								"files": [
-									{
-										"pattern": "vd55g1*.deb",
-										"target": "imgswlinux-debian-local/pool/vd55g1-dkms/stable/",
-										"props": "deb.distribution=stable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
-									},
-									{
-										"pattern": "vd55g1*.zip",
-										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/vd55g1/stable/"
-									}
-								]
-							}''',
-							failNoOp: true
-						)
-					} else {
-						rtUpload (
-							serverId: 'artifactory-azure',
-							spec: '''{
-								"files": [
-									{
-										"pattern": "vd55g1*.deb",
-										"target": "imgswlinux-debian-local/pool/vd55g1-dkms/unstable/",
-										"props": "deb.distribution=unstable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
-									},
-									{
-										"pattern": "vd55g1*.zip",
-										"target": "imgswlinux-releases-imgappswlinux-codex-st-com/drivers/vd55g1/unstable/"
-									}
-								]
-							}''',
-							failNoOp: true
-						)
-					}
+					rtUpload (
+						serverId: 'artifactory-azure',
+						spec: '''{
+							"files": [
+								{
+									"pattern": "vd55g1*.deb",
+									"target": "imgswlinux-debian-local/pool/vd55g1-dkms/stable/",
+									"props": "deb.distribution=stable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
+								}
+							]
+						}''',
+						failNoOp: true
+					)
 				}
 			}
 		}
