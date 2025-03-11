@@ -10,6 +10,7 @@ include /usr/share/dpkg/pkg-info.mk
 
 override_dh_install:
 	dh_install Makefile usr/src/vd55g1-$(DEB_VERSION_UPSTREAM)/
+	dh_install dts usr/src/vd55g1-$(DEB_VERSION_UPSTREAM)/
 	dh_install Kbuild usr/src/vd55g1-$(DEB_VERSION_UPSTREAM)/
 	dh_install *.c usr/src/vd55g1-$(DEB_VERSION_UPSTREAM)/
 
