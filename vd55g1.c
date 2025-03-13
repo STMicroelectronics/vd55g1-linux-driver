@@ -141,6 +141,8 @@
 #define VD55G1_REG_NEXT_CTX				CCI_REG16_LE(0x03e4)
 #define VD55G1_REG_EXPOSURE_USE_CASES			CCI_REG8(0x0312)
 #define VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT		BIT(2)
+#define VD55G1_REG_CTX_REPEAT_COUNT_CTX0		CCI_REG16_LE(0x03dc)
+#define VD55G1_REG_CTX_REPEAT_COUNT_CTX1		CCI_REG16_LE(0x03de)
 
 #define VD55G1_REG_EXP_MODE(ctx) \
 	CCI_REG8(0x0500 + VD55G1_CTX_OFFSET * (ctx))
@@ -161,8 +163,6 @@
 	CCI_REG8(0x051d + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_DARKCAL_PEDESTAL(ctx) \
 	CCI_REG16_LE(0x0526 + VD55G1_CTX_OFFSET * (ctx))
-#define VD55G1_REG_CTX_REPEAT_COUNT(ctx) \
-	CCI_REG16_LE(0x03dc + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_VT_MODE(ctx) \
 	CCI_REG8(0x0536 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_VT_MODE_NORMAL 0
@@ -1234,7 +1234,7 @@ static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 	case VD55G1_NO_HDR:
 		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_USE_CASES, 0, &ret);
 		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x0, &ret);
-		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT(0), 1, &ret);
+		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX0, 1, &ret);
 		vd55g1_write(sensor, VD55G1_REG_VT_MODE(0),
 			     VD55G1_VT_MODE_NORMAL, &ret);
 		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
@@ -1245,14 +1245,14 @@ static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 			     VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT, &ret);
 		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x1, &ret);
 
-		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT(0), 1, &ret);
+		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX0, 1, &ret);
 		vd55g1_write(sensor, VD55G1_REG_VT_MODE(0),
 			     VD55G1_VT_MODE_NORMAL, &ret);
 		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
 			     VD55G1_MASK_FRAME_CTRL_MASK, &ret);
 		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_INSTANCE(0), 0, &ret);
 
-		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT(1), 1, &ret);
+		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX1, 1, &ret);
 		vd55g1_write(sensor, VD55G1_REG_VT_MODE(1),
 			     VD55G1_VT_MODE_SUBTRACTION, &ret);
 		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(1),
