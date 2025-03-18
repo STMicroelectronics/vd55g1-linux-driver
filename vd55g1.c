@@ -146,9 +146,6 @@
 
 #define VD55G1_REG_EXP_MODE(ctx) \
 	CCI_REG8(0x0500 + VD55G1_CTX_OFFSET * (ctx))
-#define VD55G1_EXP_MODE_AUTO				0
-#define VD55G1_EXP_MODE_FREEZE				1
-#define VD55G1_EXP_MODE_MANUAL				2
 #define VD55G1_REG_FRAME_LENGTH(ctx) \
 	CCI_REG32_LE(0x050c + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_X_START(ctx) \
@@ -1020,8 +1017,8 @@ static int vd55g1_update_patgen(struct vd55g1 *sensor, u32 patgen_index)
 
 static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
 {
-	enum vd55g1_expo_state expo_state = is_auto ? VD55G1_EXP_MODE_AUTO :
-						      VD55G1_EXP_MODE_MANUAL;
+	enum vd55g1_expo_state expo_state = is_auto ? VD55G1_EXP_AUTO :
+						      VD55G1_EXP_MANUAL;
 	int ret = 0;
 
 	if (sensor->ae_ctrl->is_new)
@@ -1054,8 +1051,8 @@ static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
 static int vd55g1_lock_exposure(struct vd55g1 *sensor, u32 lock_val)
 {
 	bool ae_lock = lock_val & V4L2_LOCK_EXPOSURE;
-	enum vd55g1_expo_state expo_state = ae_lock ? VD55G1_EXP_MODE_FREEZE :
-						      VD55G1_EXP_MODE_AUTO;
+	enum vd55g1_expo_state expo_state = ae_lock ? VD55G1_EXP_FREEZE :
+						      VD55G1_EXP_AUTO;
 	int ret = 0;
 
 	if (sensor->ae_ctrl->val == V4L2_EXPOSURE_AUTO)
