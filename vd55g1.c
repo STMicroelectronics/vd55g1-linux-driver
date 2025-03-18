@@ -1231,7 +1231,7 @@ static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 	case VD55G1_NO_HDR:
 		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_USE_CASES, 0, &ret);
 		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x0, &ret);
-		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX0, 1, &ret);
+		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX0, 0, &ret);
 		vd55g1_write(sensor, VD55G1_REG_VT_MODE(0),
 			     VD55G1_VT_MODE_NORMAL, &ret);
 		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
