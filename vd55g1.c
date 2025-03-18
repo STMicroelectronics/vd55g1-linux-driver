@@ -1231,25 +1231,28 @@ static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 	case VD55G1_NO_HDR:
 		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_USE_CASES, 0, &ret);
 		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x0, &ret);
+
 		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX0, 0, &ret);
+
 		vd55g1_write(sensor, VD55G1_REG_VT_MODE(0),
 			     VD55G1_VT_MODE_NORMAL, &ret);
 		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
 			     VD55G1_MASK_FRAME_CTRL_OUTPUT, &ret);
 		break;
 	case VD55G1_HDR_SUB:
+		vd55g1_write(sensor, CCI_REG16_LE(0x0372), 446, &ret); //MAX COARSE
 		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_USE_CASES,
 			     VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT, &ret);
-		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x1, &ret);
 
+		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x0001, &ret);
 		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX0, 1, &ret);
+		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX1, 1, &ret);
+
 		vd55g1_write(sensor, VD55G1_REG_VT_MODE(0),
 			     VD55G1_VT_MODE_NORMAL, &ret);
 		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
 			     VD55G1_MASK_FRAME_CTRL_MASK, &ret);
 		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_INSTANCE(0), 0, &ret);
-
-		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX1, 1, &ret);
 		vd55g1_write(sensor, VD55G1_REG_VT_MODE(1),
 			     VD55G1_VT_MODE_SUBTRACTION, &ret);
 		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(1),
