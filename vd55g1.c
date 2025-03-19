@@ -141,6 +141,9 @@
 #define VD55G1_REG_NEXT_CTX				CCI_REG16_LE(0x03e4)
 #define VD55G1_REG_EXPOSURE_USE_CASES			CCI_REG8(0x0312)
 #define VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT		BIT(2)
+#define VD55G1_REG_EXPOSURE_MAX_COARSE			CCI_REG16_LE(0x0372)
+#define VD55G1_EXPOSURE_MAX_COARSE_DEF			0x7fff
+#define VD55G1_EXPOSURE_MAX_COARSE_SUB			446
 #define VD55G1_REG_CTX_REPEAT_COUNT_CTX0		CCI_REG16_LE(0x03dc)
 #define VD55G1_REG_CTX_REPEAT_COUNT_CTX1		CCI_REG16_LE(0x03de)
 
@@ -1229,6 +1232,8 @@ static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 
 	switch (sensor->hdr_ctrl->val) {
 	case VD55G1_NO_HDR:
+		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_MAX_COARSE,
+			     VD55G1_EXPOSURE_MAX_COARSE_DEF, &ret);
 		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_USE_CASES, 0, &ret);
 		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x0, &ret);
 
@@ -1240,10 +1245,10 @@ static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 			     VD55G1_MASK_FRAME_CTRL_OUTPUT, &ret);
 		break;
 	case VD55G1_HDR_SUB:
-		vd55g1_write(sensor, CCI_REG16_LE(0x0372), 446, &ret); //MAX COARSE
+		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_MAX_COARSE,
+			     VD55G1_EXPOSURE_MAX_COARSE_SUB, &ret);
 		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_USE_CASES,
 			     VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT, &ret);
-
 		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x0001, &ret);
 		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX0, 1, &ret);
 		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX1, 1, &ret);
@@ -1354,6 +1359,27 @@ static int vd55g1_update_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
 	return ret;
 }
 
+static int vd55g1_ro_ctrls_setup(struct vd55g1 *sensor)
+{
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+
+#elif KERNEL_LACKS_STREAMS
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+
+#endif
+	return vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH,
+			    crop->width + sensor->hblank_ctrl->val, NULL);
+}
+
 static int vd55g1_stream_on(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
@@ -1384,6 +1410,11 @@ static int vd55g1_stream_on(struct vd55g1 *sensor)
 
 	/* Apply settings from V4L2 ctrls */
 	ret = __v4l2_ctrl_handler_setup(&sensor->ctrl_handler);
+	if (ret)
+		return ret;
+
+	/* Also apply settings from read-only V4L2 ctrls */
+	ret = vd55g1_ro_ctrls_setup(sensor);
 	if (ret)
 		return ret;
 
@@ -1949,11 +1980,6 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	case V4L2_CID_HDR_SENSOR_MODE:
 		ret = vd55g1_update_hdr_mode(sensor);
-		break;
-	case V4L2_CID_HBLANK:
-		ret =  vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH,
-				    crop->width + ctrl->val,
-				    NULL);
 		break;
 	default:
 		ret = -EINVAL;
