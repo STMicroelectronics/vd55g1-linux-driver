@@ -9,10 +9,12 @@
 #include <linux/version.h>
 #define KERNEL_LACKS_CCI \
 	(KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
-#define KERNEL_LACKS_STREAMS \
+#define KERNEL_LACKS_NEW_STATES_API \
 	(KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_INIT_STATE \
 	(KERNEL_VERSION(6, 7, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_STREAMS_API \
+	(KERNEL_VERSION(6, 3, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_HDR_CTRL \
 	(KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_REMOVE_INT_RETURN \
@@ -683,7 +685,7 @@ static s32 get_pixel_rate(struct vd55g1 *sensor)
 {
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
-#elif KERNEL_LACKS_STREAMS
+#elif KERNEL_LACKS_NEW_STATES_API
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_mbus_framefmt *format =
@@ -707,7 +709,7 @@ static s32 get_min_line_length(struct vd55g1 *sensor)
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
 	const struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
-#elif KERNEL_LACKS_STREAMS
+#elif KERNEL_LACKS_NEW_STATES_API
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_rect *crop =
@@ -744,7 +746,7 @@ static unsigned int get_hblank_min(struct vd55g1 *sensor)
 {
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
-#elif KERNEL_LACKS_STREAMS
+#elif KERNEL_LACKS_NEW_STATES_API
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_rect *crop =
@@ -763,7 +765,7 @@ static struct vblank_limits get_vblank_limits(struct vd55g1 *sensor)
 	struct vblank_limits limits;
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
-#elif KERNEL_LACKS_STREAMS
+#elif KERNEL_LACKS_NEW_STATES_API
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_rect *crop =
@@ -1179,7 +1181,7 @@ static int vd55g1_apply_cold_start(struct vd55g1 *sensor)
 {
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
-#elif KERNEL_LACKS_STREAMS
+#elif KERNEL_LACKS_NEW_STATES_API
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_rect *crop =
@@ -1278,7 +1280,7 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
 	const struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
-#elif KERNEL_LACKS_STREAMS
+#elif KERNEL_LACKS_NEW_STATES_API
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_rect *crop =
@@ -1364,7 +1366,7 @@ static int vd55g1_ro_ctrls_setup(struct vd55g1 *sensor)
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
 
-#elif KERNEL_LACKS_STREAMS
+#elif KERNEL_LACKS_NEW_STATES_API
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_rect *crop =
@@ -1380,10 +1382,33 @@ static int vd55g1_ro_ctrls_setup(struct vd55g1 *sensor)
 			    crop->width + sensor->hblank_ctrl->val, NULL);
 }
 
-static int vd55g1_stream_on(struct vd55g1 *sensor)
+static void vd55g1_lock_ctrls(struct vd55g1 *sensor, bool enable)
 {
+	/* These settings cannot change during stream */
+	v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
+	v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
+	v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
+	v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
+	v4l2_ctrl_grab(sensor->hblank_ctrl, enable);
+	if (sensor->ext_vt_sync)
+		v4l2_ctrl_grab(sensor->slave_ctrl, enable);
+}
+
+#if KERNEL_LACKS_STREAMS_API
+static int vd55g1_enable_streams(struct v4l2_subdev *sd)
+#else
+static int vd55g1_enable_streams(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state, u32 pad,
+				 u64 streams_mask)
+#endif
+{
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 	int ret = 0;
+
+	ret = pm_runtime_resume_and_get(&client->dev);
+	if (ret < 0)
+		return ret;
 
 	vd55g1_write(sensor, VD55G1_REG_EXT_CLOCK, sensor->xclk_freq, &ret);
 
@@ -1402,26 +1427,30 @@ static int vd55g1_stream_on(struct vd55g1 *sensor)
 	/* Setup default GPIO values; could be overridden by V4L2 ctrl setup */
 	ret = vd55g1_update_gpios(sensor, GENMASK(VD55G1_NB_GPIOS - 1, 0));
 	if (ret)
-		return ret;
+		goto err_rpm_put;
 
 	ret = vd55g1_apply_cold_start(sensor);
 	if (ret)
-		return ret;
+		goto err_rpm_put;
 
 	/* Apply settings from V4L2 ctrls */
 	ret = __v4l2_ctrl_handler_setup(&sensor->ctrl_handler);
 	if (ret)
-		return ret;
+		goto err_rpm_put;
 
 	/* Also apply settings from read-only V4L2 ctrls */
 	ret = vd55g1_ro_ctrls_setup(sensor);
 	if (ret)
-		return ret;
+		goto err_rpm_put;
 
-	/* start streaming */
+	/* Start streaming */
 	vd55g1_write(sensor, VD55G1_REG_STBY, VD55G1_STBY_START_STREAM, &ret);
 	vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, &ret);
 	vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_STREAMING, &ret);
+	if (ret)
+		goto err_rpm_put;
+
+	vd55g1_lock_ctrls(sensor, true);
 
 	return ret;
 
@@ -1430,8 +1459,15 @@ err_rpm_put:
 	return ret;
 }
 
-static int vd55g1_stream_off(struct vd55g1 *sensor)
+#if KERNEL_LACKS_STREAMS_API
+static int vd55g1_disable_streams(struct v4l2_subdev *sd)
+#else
+static int vd55g1_disable_streams(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *state, u32 pad,
+				  u64 streams_mask)
+#endif
 {
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 	int ret = 0;
 
@@ -1445,6 +1481,11 @@ static int vd55g1_stream_off(struct vd55g1 *sensor)
 
 	if (ret)
 		dev_warn(&client->dev, "Can't disable stream");
+
+	vd55g1_lock_ctrls(sensor, false);
+
+	pm_runtime_mark_last_busy(&client->dev);
+	__pm_runtime_put_autosuspend(&client->dev);
 
 	return ret;
 }
@@ -1487,86 +1528,6 @@ static int vd55g1_patch(struct vd55g1 *sensor)
 	return 0;
 }
 
-static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
-{
-	struct vd55g1 *sensor = to_vd55g1(sd);
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
-#if KERNEL_LACKS_ACTIVE_STATES
-#else
-	struct v4l2_subdev_state *state;
-#endif
-	int ret = 0;
-
-#if KERNEL_LACKS_ACTIVE_STATES
-	mutex_lock(&sensor->lock);
-#else
-	state = v4l2_subdev_lock_and_get_active_state(sd);
-#endif
-
-	if (enable) {
-#if KERNEL_VERSION(5, 10, 0) > LINUX_VERSION_CODE
-		ret = pm_runtime_get_sync(&client->dev);
-		if (ret < 0) {
-			pm_runtime_put_noidle(&client->dev);
-			goto unlock;
-		}
-#else
-		ret = pm_runtime_resume_and_get(&client->dev);
-		if (ret < 0)
-			goto unlock;
-#endif
-		ret = vd55g1_stream_on(sensor);
-		if (ret) {
-			dev_err(&client->dev, "Failed to start streaming\n");
-			pm_runtime_put_sync(&client->dev);
-		}
-	} else {
-		vd55g1_stream_off(sensor);
-		pm_runtime_mark_last_busy(&client->dev);
-		pm_runtime_put_autosuspend(&client->dev);
-	}
-
-	if (!ret)
-		sensor->streaming = enable;
-
-#if KERNEL_LACKS_LOCKED_GRAB
-unlock:
-#if KERNEL_LACKS_ACTIVE_STATES
-	mutex_unlock(&sensor->lock);
-#endif
-
-	if (!ret) {
-		/* These settings cannot change during streaming */
-		v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
-		v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
-		v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
-		v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
-		v4l2_ctrl_grab(sensor->hblank_ctrl, enable);
-		if (sensor->ext_vt_sync)
-			v4l2_ctrl_grab(sensor->slave_ctrl, enable);
-#else
-	if (!ret) {
-		/* These settings cannot change during streaming */
-		__v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
-		__v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
-		__v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
-		__v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
-		__v4l2_ctrl_grab(sensor->hblank_ctrl, enable);
-		if (sensor->ext_vt_sync)
-			__v4l2_ctrl_grab(sensor->slave_ctrl, enable);
-	}
-
-unlock:
-#if KERNEL_LACKS_ACTIVE_STATES
-	mutex_unlock(&sensor->lock);
-#else
-	v4l2_subdev_unlock_state(state);
-#endif
-#endif
-
-	return ret;
-}
-
 #if KERNEL_LACKS_SUBDEV_STATES
 static int vd55g1_get_selection(struct v4l2_subdev *sd,
 				struct v4l2_subdev_pad_config *cfg,
@@ -1580,7 +1541,7 @@ static int vd55g1_get_selection(struct v4l2_subdev *sd,
 #if KERNEL_LACKS_ACTIVE_STATES
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	const struct v4l2_rect *crop = &sensor->active_crop;
-#elif KERNEL_LACKS_STREAMS
+#elif KERNEL_LACKS_NEW_STATES_API
 	const struct v4l2_rect *crop =
 		v4l2_subdev_get_pad_crop(sd, sd_state, 0);
 #else
@@ -1661,7 +1622,7 @@ static void vd55g1_new_format_change_controls(struct vd55g1 *sensor)
 {
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
-#elif KERNEL_LACKS_STREAMS
+#elif KERNEL_LACKS_NEW_STATES_API
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_rect *crop =
@@ -1750,7 +1711,7 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 
 	mutex_unlock(&sensor->lock);
 #else
-#if KERNEL_LACKS_STREAMS
+#if KERNEL_LACKS_NEW_STATES_API
 	format = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
 #else
 	format = v4l2_subdev_state_get_format(sd_state, sd_fmt->pad);
@@ -1758,7 +1719,7 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 
 	*format = sd_fmt->format;
 
-#if KERNEL_LACKS_STREAMS
+#if KERNEL_LACKS_NEW_STATES_API
 	*v4l2_subdev_get_pad_crop(sd, sd_state, sd_fmt->pad) = pad_crop;
 #else
 	*v4l2_subdev_state_get_crop(sd_state, sd_fmt->pad) = pad_crop;
@@ -1781,6 +1742,20 @@ static int vd55g1_init_state(struct v4l2_subdev *sd,
 	unsigned int def_mode = VD55G1_DEFAULT_MODE;
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct v4l2_subdev_format fmt = { 0 };
+#if !KERNEL_LACKS_STREAMS_API
+	struct v4l2_subdev_route routes[] = { 0 };
+	struct v4l2_subdev_krouting routing = {
+	    .num_routes = ARRAY_SIZE(routes),
+	    .routes = routes,
+	};
+	int ret;
+
+	/* Needed by v4l2_subdev_s_stream_helper(), even with 1 stream only */
+	routes[0].flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE;
+	ret = v4l2_subdev_set_routing(sd, sd_state, &routing);
+	if (ret)
+		return ret;
+#endif
 
 	vd55g1_update_img_pad_format(sensor, &vd55g1_supported_modes[def_mode],
 				     VD55G1_MEDIA_BUS_FMT_DEF, &fmt.format);
@@ -1813,9 +1788,15 @@ static int vd55g1_enum_frame_size(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static const struct v4l2_subdev_video_ops vd55g1_video_ops = {
-	.s_stream = vd55g1_s_stream,
-};
+#if KERNEL_LACKS_STREAMS_API
+/* Wrapper to enable/disable_streams() */
+static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
+{
+	if (enable)
+		return vd55g1_enable_streams(sd);
+	return vd55g1_disable_streams(sd);
+}
+#endif
 
 #if !KERNEL_LACKS_INIT_STATE
 static const struct v4l2_subdev_internal_ops vd55g1_internal_ops = {
@@ -1836,6 +1817,18 @@ static const struct v4l2_subdev_pad_ops vd55g1_pad_ops = {
 	.set_fmt = vd55g1_set_pad_fmt,
 	.get_selection = vd55g1_get_selection,
 	.enum_frame_size = vd55g1_enum_frame_size,
+#if !KERNEL_LACKS_STREAMS_API
+	.enable_streams = vd55g1_enable_streams,
+	.disable_streams = vd55g1_disable_streams,
+#endif
+};
+
+static const struct v4l2_subdev_video_ops vd55g1_video_ops = {
+#if KERNEL_LACKS_STREAMS_API
+	.s_stream = vd55g1_s_stream,
+#else
+	.s_stream = v4l2_subdev_s_stream_helper,
+#endif
 };
 
 static const struct v4l2_subdev_ops vd55g1_subdev_ops = {
@@ -1887,7 +1880,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	bool is_auto = false;
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
-#elif KERNEL_LACKS_STREAMS
+#elif KERNEL_LACKS_NEW_STATES_API
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_rect *crop =
