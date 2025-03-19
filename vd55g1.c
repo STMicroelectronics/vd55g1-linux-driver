@@ -2486,7 +2486,6 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 		return ret;
 	}
 
-	/* Init vd56g3 struct : default resolution + raw8 */
 	sensor->streaming = false;
 #if KERNEL_LACKS_ACTIVE_STATES
 	vd55g1_update_img_pad_format(sensor, &vd55g1_supported_modes[def_mode],
