@@ -1107,18 +1107,13 @@ static int vd55g1_get_temp(struct vd55g1 *sensor, int *temp)
 		return vd55g1_get_temp_stream_disable(sensor, temp);
 }
 
-static int vd55g1_read_expo_cluster(struct vd55g1 *sensor, bool force_cur_val)
+static int vd55g1_read_expo_cluster(struct vd55g1 *sensor)
 {
 	u64 exposure = 0;
 	u64 again = 0;
 	u64 dgain = 0;
 	int ret = 0;
 
-	/*
-	 * When 'force_cur_val' is enabled, save the ctrl value in 'cur.val'
-	 * instead of the normal 'val', this is used during poweroff to cache
-	 * volatile ctrls and enable coldstart.
-	 */
 	vd55g1_read(sensor, VD55G1_REG_APPLIED_COARSE_EXPOSURE, &exposure,
 		    &ret);
 	vd55g1_read(sensor, VD55G1_REG_APPLIED_ANALOG_GAIN, &again, &ret);
@@ -1472,7 +1467,7 @@ static int vd55g1_disable_streams(struct v4l2_subdev *sd,
 	int ret = 0;
 
 	/* Retrieve Expo cluster to enable coldstart of AE */
-	ret = vd55g1_read_expo_cluster(sensor, true);
+	ret = vd55g1_read_expo_cluster(sensor);
 
 	vd55g1_write(sensor, VD55G1_REG_STREAMING, VD55G1_STREAMING_STOP_STREAM,
 		     &ret);
@@ -1856,7 +1851,7 @@ static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 		ret = __v4l2_ctrl_s_ctrl(ctrl, temperature);
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
-		ret = vd55g1_read_expo_cluster(sensor, false);
+		ret = vd55g1_read_expo_cluster(sensor);
 		break;
 	default:
 		ret = -EINVAL;
