@@ -57,12 +57,6 @@ properties:
       minimum: 0
       maximum: 3
 
-  orientation:
-    maxItems: 1
-
-  rotation:
-    maxItems: 1
-
   port:
     $ref: /schemas/graph.yaml#/$defs/port-base
     additionalProperties: false
