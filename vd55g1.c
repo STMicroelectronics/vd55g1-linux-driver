@@ -967,18 +967,18 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 		return -EINVAL;
 	}
 
-	if (mipi_freq < 300 * HZ_PER_MHZ)
+	if (mipi_freq <= 300 * HZ_PER_MHZ)
 		mipi_div = 4;
-	else if (mipi_freq < 600 * HZ_PER_MHZ)
+	else if (mipi_freq <= 600 * HZ_PER_MHZ)
 		mipi_div = 2;
 	else
 		mipi_div = 1;
 
 	sys_clk = mipi_freq * mipi_div;
 
-	if (sys_clk < 780 * HZ_PER_MHZ)
+	if (sys_clk <= 780 * HZ_PER_MHZ)
 		pixel_div = 5;
-	else if (sys_clk < 900 * HZ_PER_MHZ)
+	else if (sys_clk <= 900 * HZ_PER_MHZ)
 		pixel_div = 6;
 	else
 		pixel_div = 8;
