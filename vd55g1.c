@@ -652,8 +652,9 @@ static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
 		ctrl_handler)->sd;
 }
 
-static u8 get_bpp_by_code(__u32 code)
+static u8 get_bpp_by_code(struct vd55g1 *sensor, u32 code)
 {
+	struct i2c_client *client = sensor->i2c_client;
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(vd55g1_mbus_codes); i++) {
@@ -661,12 +662,13 @@ static u8 get_bpp_by_code(__u32 code)
 			return vd55g1_mbus_codes[i].bpp;
 	}
 	/* Should never happen */
-	WARN(1, "Unsupported code %d. default to 8 bpp", code);
+	dev_warn(&client->dev, "Unsupported code %d. default to 8 bpp", code);
 	return 8;
 }
 
-static u8 get_data_type_by_code(__u32 code)
+static u8 get_data_type_by_code(struct vd55g1 *sensor, u32 code)
 {
+	struct i2c_client *client = sensor->i2c_client;
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(vd55g1_mbus_codes); i++) {
@@ -674,8 +676,8 @@ static u8 get_data_type_by_code(__u32 code)
 			return vd55g1_mbus_codes[i].data_type;
 	}
 	/* Should never happen */
-	WARN(1, "Unsupported code %d. default to MIPI_CSI2_DT_RAW8 data type",
-	     code);
+	dev_warn(&client->dev, "Unsupported code %d. default to MIPI_CSI2_DT_RAW8 data type",
+		 code);
 	return MIPI_CSI2_DT_RAW8;
 }
 
@@ -696,7 +698,7 @@ static s32 get_pixel_rate(struct vd55g1 *sensor)
 #endif
 
 	return div64_u64((u64)sensor->data_rate_in_mbps,
-			 get_bpp_by_code(format->code));
+			 get_bpp_by_code(sensor, format->code));
 }
 
 static s32 get_min_line_length(struct vd55g1 *sensor)
@@ -725,7 +727,7 @@ static s32 get_min_line_length(struct vd55g1 *sensor)
 
 	/* MIPI required time */
 	mipi_req_line_time = (crop->width *
-			      get_bpp_by_code(format->code) +
+			      get_bpp_by_code(sensor, format->code) +
 			      VD55G1_MIPI_MARGIN) /
 			      (sensor->data_rate_in_mbps / MEGA);
 	mipi_req_line_length = mipi_req_line_time * sensor->pixel_clock /
@@ -1261,8 +1263,6 @@ static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_INSTANCE(1), 1, &ret);
 		break;
 	default:
-		/* Should never happen */
-		WARN(1, "Unsupported hdr mode %d", sensor->hdr_ctrl->val);
 		ret = -EINVAL;
 	}
 
@@ -1293,9 +1293,9 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 	int ret = 0;
 
 	vd55g1_write(sensor, VD55G1_REG_FORMAT_CTRL,
-		     get_bpp_by_code(format->code), &ret);
+		     get_bpp_by_code(sensor, format->code), &ret);
 	vd55g1_write(sensor, VD55G1_REG_OIF_IMG_CTRL,
-		     get_data_type_by_code(format->code), &ret);
+		     get_data_type_by_code(sensor, format->code), &ret);
 
 	switch (crop->width / format->width) {
 	case 1:
