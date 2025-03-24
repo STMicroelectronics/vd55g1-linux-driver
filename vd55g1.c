@@ -1014,10 +1014,9 @@ static int vd55g1_update_patgen(struct vd55g1 *sensor, u32 patgen_index)
 
 	vd55g1_write(sensor, VD55G1_REG_DARKCAL_CTRL, darkcal, &ret);
 	vd55g1_write(sensor, VD55G1_REG_DUSTER_CTRL, duster, &ret);
-	if (ret)
-		return ret;
+	vd55g1_write(sensor, VD55G1_REG_PATGEN_CTRL, reg, &ret);
 
-	return vd55g1_write(sensor, VD55G1_REG_PATGEN_CTRL, reg, NULL);
+	return ret;
 }
 
 static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
@@ -1031,8 +1030,8 @@ static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
 
 	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB &&
 	    sensor->hdr_ctrl->is_new) {
-		ret = vd55g1_write(sensor, VD55G1_REG_EXP_MODE(1),
-				   VD55G1_EXP_BYPASS, NULL);
+		vd55g1_write(sensor, VD55G1_REG_EXP_MODE(1), VD55G1_EXP_BYPASS,
+			     &ret);
 		if (ret)
 			return ret;
 	}
