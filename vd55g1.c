@@ -881,7 +881,7 @@ static int vd55g1_write_array(struct vd55g1 *sensor, u32 reg, unsigned int len,
 {
 	unsigned int chunk_sz = 1024;
 	unsigned int sz;
-	int ret;
+	int ret = 0;
 
 	if (err && *err)
 		return *err;
