@@ -2580,13 +2580,13 @@ static int vd55g1_probe(struct i2c_client *client)
 
 	ret = vd55g1_subdev_init(sensor);
 	if (ret) {
-		dev_err(&client->dev, "V4l2 init failed : %d", ret);
+		dev_err(dev, "V4l2 init failed : %d", ret);
 		goto err_power_off;
 	}
 
 	ret = v4l2_async_register_subdev(&sensor->sd);
 	if (ret) {
-		dev_err(&client->dev, "async subdev register failed %d", ret);
+		dev_err(dev, "async subdev register failed %d", ret);
 		goto err_subdev;
 	}
 
@@ -2596,7 +2596,7 @@ static int vd55g1_probe(struct i2c_client *client)
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_mark_last_busy(dev);
 
-	dev_dbg(&client->dev, "vd55g1 probe successfully");
+	dev_dbg(dev, "vd55g1 probe successfully");
 
 	return 0;
 
