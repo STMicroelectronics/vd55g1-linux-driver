@@ -1323,17 +1323,14 @@ static int vd55g1_update_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
 			gpio_val = VD55G1_GPIO_MODE_IN;
 			if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB) {
 				/* Make its context 1 counterpart strobe too */
-				ret = vd55g1_write(sensor,
-						   VD55G1_REG_GPIO_0_CTRL(1) +
-						   io,
-						   gpio_val, NULL);
-				if (ret)
-					return ret;
+				vd55g1_write(sensor,
+					     VD55G1_REG_GPIO_0_CTRL(1) + io,
+					     gpio_val, &ret);
 			}
 		}
 
-		vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(0) + io, gpio_val,
-			     &ret);
+		ret = vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(0) + io,
+				   gpio_val, &ret);
 	}
 
 	return ret;
