@@ -1156,17 +1156,6 @@ static int vd55g1_update_exposure_target(struct vd55g1 *sensor, int index)
 			    exposure_target, NULL);
 }
 
-static int vd55g1_apply_reset(struct vd55g1 *sensor)
-{
-	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
-	usleep_range(5000, 10000);
-	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
-	usleep_range(5000, 10000);
-	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
-	usleep_range(5000, 10000);
-	return vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_READY_TO_BOOT, NULL);
-}
-
 static int vd55g1_apply_cold_start(struct vd55g1 *sensor)
 {
 #if KERNEL_LACKS_ACTIVE_STATES
@@ -2209,12 +2198,12 @@ static int vd55g1_power_on(struct vd55g1 *sensor)
 		goto disable_bulk;
 	}
 
-	if (sensor->reset_gpio) {
-		ret = vd55g1_apply_reset(sensor);
-		if (ret) {
-			dev_err(&client->dev, "Sensor reset failed %d\n", ret);
-			goto disable_clock;
-		}
+	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
+	usleep_range(5000, 10000);
+	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_READY_TO_BOOT, NULL);
+	if (ret) {
+		dev_err(&client->dev, "Sensor reset failed %d\n", ret);
+		goto disable_clock;
 	}
 
 	ret = vd55g1_detect(sensor);
@@ -2236,6 +2225,7 @@ static int vd55g1_power_on(struct vd55g1 *sensor)
 	return 0;
 
 disable_clock:
+	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
 	clk_disable_unprepare(sensor->xclk);
 disable_bulk:
 	regulator_bulk_disable(ARRAY_SIZE(vd55g1_supply_name),
