@@ -1471,26 +1471,18 @@ static int vd55g1_patch(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	u64 patch;
-	int ret;
+	int ret = 0;
 
-	ret = vd55g1_write_array(sensor, VD55G1_REG_FWPATCH_START_ADDR,
-				 sizeof(patch_array), patch_array, NULL);
-	if (ret)
+	vd55g1_write_array(sensor, VD55G1_REG_FWPATCH_START_ADDR,
+			   sizeof(patch_array), patch_array, &ret);
+	vd55g1_write(sensor, VD55G1_REG_BOOT, VD55G1_BOOT_PATCH_SETUP, &ret);
+	vd55g1_poll_reg(sensor, VD55G1_REG_BOOT, 0, &ret);
+	if (ret) {
+		dev_err(&client->dev, "Failed to apply patch");
 		return ret;
+	}
 
-	ret = vd55g1_write(sensor, VD55G1_REG_BOOT, VD55G1_BOOT_PATCH_SETUP,
-			   NULL);
-	if (ret)
-		return ret;
-
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_BOOT, 0, NULL);
-	if (ret)
-		return ret;
-
-	vd55g1_read(sensor, VD55G1_REG_FWPATCH_REVISION, &patch, NULL);
-	if (ret)
-		return ret;
-
+	vd55g1_read(sensor, VD55G1_REG_FWPATCH_REVISION, &patch, &ret);
 	if (patch != (VD55G1_FWPATCH_REVISION_MAJOR << 8) +
 	    VD55G1_FWPATCH_REVISION_MINOR) {
 		dev_err(&client->dev, "Bad patch version expected %d.%d got %d.%d",
