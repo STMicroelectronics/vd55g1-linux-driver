@@ -1124,9 +1124,7 @@ static int vd55g1_read_expo_cluster(struct vd55g1 *sensor)
 	sensor->again_ctrl->cur.val = again;
 	sensor->dgain_ctrl->cur.val = dgain;
 
-	if (ret)
-		return -EIO;
-	return ret;
+	return 0;
 }
 
 static int vd55g1_update_frame_length(struct vd55g1 *sensor,
