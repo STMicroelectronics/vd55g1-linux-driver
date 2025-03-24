@@ -1587,7 +1587,7 @@ static int vd55g1_get_pad_fmt(struct v4l2_subdev *sd,
 }
 #endif
 
-static void vd55g1_new_format_change_controls(struct vd55g1 *sensor)
+static int vd55g1_new_format_change_controls(struct vd55g1 *sensor)
 {
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
@@ -1605,23 +1605,35 @@ static void vd55g1_new_format_change_controls(struct vd55g1 *sensor)
 	unsigned int hblank;
 	unsigned int frame_length = 0;
 	unsigned int expo_max;
+	int ret;
 
 	/* Reset vblank and frame length to default */
 	vblank = get_vblank_limits(sensor);
-	__v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank.min,
-				 vblank.max, 1, vblank.def);
+	ret = __v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank.min,
+				       vblank.max, 1, vblank.def);
+	if (ret)
+		return ret;
+
 	/* Max exposure changes with vblank */
 	frame_length = crop->height + sensor->vblank_ctrl->val;
 	expo_max = frame_length - VD55G1_EXPO_MAX_TERM;
-	__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
-				 VD55G1_EXPO_DEF);
+	ret = __v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
+				       VD55G1_EXPO_DEF);
+	if (ret)
+		return ret;
+
 	/* Update pixel rate to reflect new bpp */
-	__v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
-				 get_pixel_rate(sensor));
+	ret = __v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
+				       get_pixel_rate(sensor));
+	if (ret)
+		return ret;
+
 	/* Update hblank according to new width */
 	hblank = get_hblank_min(sensor);
-	__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank, hblank, 1,
-				 hblank);
+	ret = __v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank, hblank, 1,
+				       hblank);
+
+	return ret;
 }
 
 #if KERNEL_LACKS_SUBDEV_STATES
@@ -1639,8 +1651,9 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	struct v4l2_mbus_framefmt *format;
 	struct v4l2_rect pad_crop;
 	unsigned int binning;
-
 #if KERNEL_LACKS_ACTIVE_STATES
+	int ret = 0;
+
 	mutex_lock(&sensor->lock);
 #endif
 
@@ -1675,10 +1688,12 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	} else {
 		sensor->active_fmt = sd_fmt->format;
 		sensor->active_crop = pad_crop;
-		vd55g1_new_format_change_controls(sensor);
+		return vd55g1_new_format_change_controls(sensor);
 	}
 
 	mutex_unlock(&sensor->lock);
+
+	return ret;
 #else
 #if KERNEL_LACKS_NEW_STATES_API
 	format = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
@@ -1694,10 +1709,10 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	*v4l2_subdev_state_get_crop(sd_state, sd_fmt->pad) = pad_crop;
 #endif
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		vd55g1_new_format_change_controls(sensor);
-#endif
+		return vd55g1_new_format_change_controls(sensor);
 
 	return 0;
+#endif
 }
 
 #if KERNEL_LACKS_SUBDEV_STATES
@@ -1859,7 +1874,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
 	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
 #endif
-	int ret = -EINVAL;
+	int ret = 0;
 
 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
 		return 0;
@@ -1869,8 +1884,8 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_VBLANK:
 		frame_length = crop->height + ctrl->val;
 		expo_max = frame_length - VD55G1_EXPO_MAX_TERM;
-		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
-					 VD55G1_EXPO_DEF);
+		ret = __v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max,
+					       1, VD55G1_EXPO_DEF);
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
 		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
@@ -1888,13 +1903,18 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		/* Discriminate if the userspace changed the control value */
 		if (ctrl->val != ctrl->cur.val) {
 			/* Max horizontal blanking changes with hdr mode */
-			__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank,
-						 hblank, 1, hblank);
+			ret = __v4l2_ctrl_modify_range(sensor->hblank_ctrl,
+						       hblank, hblank, 1,
+						       hblank);
 		}
 		break;
 	default:
 		break;
 	}
+
+	/* Don't modify hardware if controls modification failed */
+	if (ret)
+		return ret;
 
 	/* Interact with HW only when it is powered ON */
 	if (!pm_runtime_get_if_in_use(&client->dev))
@@ -2547,7 +2567,7 @@ static int vd55g1_probe(struct i2c_client *client)
 		return dev_err_probe(dev, PTR_ERR(sensor->regmap),
 				     "Failed to init regmap.");
 
-	/* Detect if sensor is present and its revision is supported */
+	/* Detect if sensor is present and if its revision is supported */
 	ret = vd55g1_power_on(sensor);
 	if (ret)
 		return ret;
