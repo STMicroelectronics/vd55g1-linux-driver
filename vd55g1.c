@@ -1135,12 +1135,10 @@ static int vd55g1_update_frame_length(struct vd55g1 *sensor,
 	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB) {
 		vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(1), frame_length,
 			     &ret);
-		if (ret)
-			return ret;
 	}
+	vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(0), frame_length, &ret);
 
-	return vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(0),
-			    frame_length, NULL);
+	return ret;
 }
 
 static int vd55g1_update_exposure_target(struct vd55g1 *sensor, int index)
