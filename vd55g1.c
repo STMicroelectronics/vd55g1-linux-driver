@@ -1245,6 +1245,7 @@ static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_USE_CASES,
 			     VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT, &ret);
 		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x0001, &ret);
+
 		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX0, 1, &ret);
 		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX1, 1, &ret);
 
