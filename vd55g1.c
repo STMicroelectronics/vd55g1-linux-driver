@@ -1446,6 +1446,7 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 		goto err_rpm_put;
 
 	vd55g1_lock_ctrls(sensor, true);
+	sensor->streaming = true;
 
 	return ret;
 
@@ -1478,6 +1479,7 @@ static int vd55g1_disable_streams(struct v4l2_subdev *sd,
 		dev_warn(&client->dev, "Can't disable stream");
 
 	vd55g1_lock_ctrls(sensor, false);
+	sensor->streaming = false;
 
 	pm_runtime_mark_last_busy(&client->dev);
 	__pm_runtime_put_autosuspend(&client->dev);
