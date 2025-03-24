@@ -529,8 +529,6 @@ enum vd55g1_gpio_mode {
 struct vd55g1_mode {
 	u32 width;
 	u32 height;
-	enum vd55g1_bin_mode bin_mode;
-	struct v4l2_rect crop;
 };
 
 struct vd55g1_fmt_desc {
