@@ -2224,8 +2224,11 @@ static int vd55g1_power_on(struct vd55g1 *sensor)
 	}
 
 	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY, NULL);
-	if (ret)
-		return ret;
+	if (ret) {
+		dev_err(&client->dev, "Sensor waiting after patch failed %d",
+			ret);
+		goto disable_clock;
+	}
 
 	return 0;
 
