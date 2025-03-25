@@ -2184,22 +2184,22 @@ static int vd55g1_detect(struct vd55g1 *sensor)
 	return vd55g1_check_sensor_revision(sensor);
 }
 
-/* Power/clock management functions */
-static int vd55g1_power_on(struct vd55g1 *sensor)
+static int vd55g1_power_on(struct device *dev)
 {
-	struct i2c_client *client = sensor->i2c_client;
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	int ret;
 
 	ret = regulator_bulk_enable(ARRAY_SIZE(vd55g1_supply_name),
 				    sensor->supplies);
 	if (ret) {
-		dev_err(&client->dev, "Failed to enable regulators %d", ret);
+		dev_err(dev, "Failed to enable regulators %d", ret);
 		return ret;
 	}
 
 	ret = clk_prepare_enable(sensor->xclk);
 	if (ret) {
-		dev_err(&client->dev, "Failed to enable clock %d", ret);
+		dev_err(dev, "Failed to enable clock %d", ret);
 		goto disable_bulk;
 	}
 
@@ -2207,25 +2207,25 @@ static int vd55g1_power_on(struct vd55g1 *sensor)
 	usleep_range(5000, 10000);
 	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_READY_TO_BOOT, NULL);
 	if (ret) {
-		dev_err(&client->dev, "Sensor reset failed %d\n", ret);
+		dev_err(dev, "Sensor reset failed %d\n", ret);
 		goto disable_clock;
 	}
 
 	ret = vd55g1_detect(sensor);
 	if (ret) {
-		dev_err(&client->dev, "Sensor detect failed %d", ret);
+		dev_err(dev, "Sensor detect failed %d", ret);
 		goto disable_clock;
 	}
 
 	ret = vd55g1_patch(sensor);
 	if (ret) {
-		dev_err(&client->dev, "Sensor patch failed %d", ret);
+		dev_err(dev, "Sensor patch failed %d", ret);
 		goto disable_clock;
 	}
 
 	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY, NULL);
 	if (ret) {
-		dev_err(&client->dev, "Sensor waiting after patch failed %d",
+		dev_err(dev, "Sensor waiting after patch failed %d",
 			ret);
 		goto disable_clock;
 	}
@@ -2242,8 +2242,11 @@ disable_bulk:
 	return ret;
 }
 
-static int vd55g1_power_off(struct vd55g1 *sensor)
+static int vd55g1_power_off(struct device *dev)
 {
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct vd55g1 *sensor = to_vd55g1(sd);
+
 	clk_disable_unprepare(sensor->xclk);
 	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
 	regulator_bulk_disable(ARRAY_SIZE(sensor->supplies), sensor->supplies);
@@ -2453,7 +2456,6 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 #endif
 
 	/* Init sub device */
-	v4l2_i2c_subdev_init(&sensor->sd, client, &vd55g1_subdev_ops);
 	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
 #if !KERNEL_LACKS_INIT_STATE
 	sensor->sd.internal_ops = &vd55g1_internal_ops;
@@ -2487,8 +2489,8 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 #endif
 
 	/*
-	 * Initiliaze controls after update_img_pad_format to make sure default
-	 * values are set.
+	 * Initiliaze controls after v4l2_subdev_init_finalize() to make sure
+	 * default values are set.
 	 */
 	ret = vd55g1_init_ctrls(sensor);
 	if (ret) {
@@ -2530,6 +2532,7 @@ static int vd55g1_probe(struct i2c_client *client)
 	if (!sensor)
 		return -ENOMEM;
 
+	v4l2_i2c_subdev_init(&sensor->sd, client, &vd55g1_subdev_ops);
 	sensor->i2c_client = client;
 
 	ret = vd55g1_parse_dt(sensor);
@@ -2567,7 +2570,7 @@ static int vd55g1_probe(struct i2c_client *client)
 				     "Failed to init regmap.");
 
 	/* Detect if sensor is present and if its revision is supported */
-	ret = vd55g1_power_on(sensor);
+	ret = vd55g1_power_on(dev);
 	if (ret)
 		return ret;
 
@@ -2583,7 +2586,9 @@ static int vd55g1_probe(struct i2c_client *client)
 		goto err_subdev;
 	}
 
+	/* Enable pm_runtime and power off the sensor */
 	pm_runtime_set_active(dev);
+	pm_runtime_get_noresume(dev);
 	pm_runtime_enable(dev);
 	pm_runtime_set_autosuspend_delay(dev, 4000);
 	pm_runtime_use_autosuspend(dev);
@@ -2596,8 +2601,7 @@ static int vd55g1_probe(struct i2c_client *client)
 err_subdev:
 	vd55g1_subdev_cleanup(sensor);
 err_power_off:
-	pm_runtime_disable(dev);
-	vd55g1_power_off(sensor);
+	vd55g1_power_off(dev);
 
 	return ret;
 }
@@ -2615,7 +2619,7 @@ static void vd55g1_remove(struct i2c_client *client)
 
 	pm_runtime_disable(&client->dev);
 	if (!pm_runtime_status_suspended(&client->dev))
-		vd55g1_power_off(sensor);
+		vd55g1_power_off(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
 #if KERNEL_LACKS_REMOVE_INT_RETURN
 	return 0;
@@ -2628,24 +2632,8 @@ static const struct of_device_id vd55g1_dt_ids[] = {
 };
 MODULE_DEVICE_TABLE(of, vd55g1_dt_ids);
 
-static int vd55g1_runtime_resume(struct device *dev)
-{
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
-	struct vd55g1 *vd55g1 = to_vd55g1(sd);
-
-	return vd55g1_power_on(vd55g1);
-}
-
-static int vd55g1_runtime_suspend(struct device *dev)
-{
-	struct v4l2_subdev *sd = dev_get_drvdata(dev);
-	struct vd55g1 *vd55g1 = to_vd55g1(sd);
-
-	return vd55g1_power_off(vd55g1);
-}
-
 static const struct dev_pm_ops vd55g1_pm_ops = {
-	SET_RUNTIME_PM_OPS(vd55g1_runtime_suspend, vd55g1_runtime_resume, NULL)
+	SET_RUNTIME_PM_OPS(vd55g1_power_off, vd55g1_power_on, NULL)
 };
 
 static struct i2c_driver vd55g1_i2c_driver = {
