@@ -2181,11 +2181,7 @@ static int vd55g1_detect(struct vd55g1 *sensor)
 		return -ENODEV;
 	}
 
-	ret = vd55g1_check_sensor_revision(sensor);
-	if (ret)
-		return ret;
-
-	return 0;
+	return vd55g1_check_sensor_revision(sensor);
 }
 
 /* Power/clock management functions */
