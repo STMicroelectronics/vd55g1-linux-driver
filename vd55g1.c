@@ -23,6 +23,8 @@
 	(KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_SUBDEV_STATES \
 	(KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_DEV_ERR_PROBE \
+	(KERNEL_VERSION(5, 9, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_DEVICE_PROPERTIES \
 	(KERNEL_VERSION(5, 8, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_LOCKED_GRAB \
@@ -2530,6 +2532,16 @@ static void vd55g1_subdev_cleanup(struct vd55g1 *sensor)
 	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
 }
 
+static int vd55g1_err_probe(struct device *dev, int ret, char *msg)
+{
+#if KERNEL_LACKS_DEV_ERR_PROBE
+	dev_err(dev, "%s", msg);
+	return ret;
+#else
+	return dev_err_probe(dev, ret, msg);
+#endif
+}
+
 static int vd55g1_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
@@ -2545,17 +2557,18 @@ static int vd55g1_probe(struct i2c_client *client)
 
 	ret = vd55g1_parse_dt(sensor);
 	if (ret)
-		return dev_err_probe(dev, ret, "Failed to parse Device Tree.");
+		return vd55g1_err_probe(dev, ret,
+					"Failed to parse Device Tree.");
 
 	/* Get (and check) resources : power regs, ext clock, reset gpio */
 	ret = vd55g1_get_regulators(sensor);
 	if (ret)
-		return dev_err_probe(dev, ret, "Failed to get regulators.");
+		return vd55g1_err_probe(dev, ret, "Failed to get regulators.");
 
 	sensor->xclk = devm_clk_get(dev, NULL);
 	if (IS_ERR(sensor->xclk)) {
-		return dev_err_probe(dev, PTR_ERR(sensor->xclk),
-				     "Failed to get xclk.");
+		return vd55g1_err_probe(dev, PTR_ERR(sensor->xclk),
+					"Failed to get xclk.");
 	}
 	sensor->xclk_freq = clk_get_rate(sensor->xclk);
 	ret = vd55g1_prepare_clock_tree(sensor);
@@ -2565,8 +2578,8 @@ static int vd55g1_probe(struct i2c_client *client)
 	sensor->reset_gpio =
 		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
 	if (IS_ERR(sensor->reset_gpio))
-		return dev_err_probe(dev, PTR_ERR(sensor->reset_gpio),
-				     "Failed to get reset gpio.");
+		return vd55g1_err_probe(dev, PTR_ERR(sensor->reset_gpio),
+					"Failed to get reset gpio.");
 
 #if KERNEL_LACKS_CCI
 	sensor->regmap = devm_regmap_init_i2c(client, &vd55g1_regmap_config);
@@ -2574,8 +2587,8 @@ static int vd55g1_probe(struct i2c_client *client)
 	sensor->regmap = devm_cci_regmap_init_i2c(client, 16);
 #endif
 	if (IS_ERR(sensor->regmap))
-		return dev_err_probe(dev, PTR_ERR(sensor->regmap),
-				     "Failed to init regmap.");
+		return vd55g1_err_probe(dev, PTR_ERR(sensor->regmap),
+					"Failed to init regmap.");
 
 	/* Detect if sensor is present and if its revision is supported */
 	ret = vd55g1_power_on(dev);
