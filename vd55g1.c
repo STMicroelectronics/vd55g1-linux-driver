@@ -1381,7 +1381,15 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 	int ret = 0;
 
+#if (KERNEL_VERSION(5, 9, 0) > LINUX_VERSION_CODE)
+	ret = __pm_runtime_resume(&client->dev, RPM_GET_PUT);
+	if (ret < 0) {
+		pm_runtime_put_noidle(&client->dev);
+		return ret;
+	}
+#else
 	ret = pm_runtime_resume_and_get(&client->dev);
+#endif
 	if (ret < 0)
 		return ret;
 
