@@ -1,3 +1,9 @@
+vd55g1-dkms (2.0.0-1) unstable; urgency=medium
+
+  * New upstream release
+
+ -- Benjamin Mugnier <benjamin.mugnier@st.com>  Fri, 28 Mar 2025 10:06:34 +0100
+
 vd55g1-dkms (1.0.4-2) unstable; urgency=medium
 
   * Add dts folder to package
