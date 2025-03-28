@@ -2,10 +2,35 @@
 /*
  * Driver for VD55G1 global shutter sensor family driver
  *
- * Copyright (C) 2023 STMicroelectronics SA
+ * Copyright (C) 2025 STMicroelectronics SA
  */
 
+/* Backward compatibility */
 #include <linux/version.h>
+#define KERNEL_LACKS_CCI \
+	(KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_NEW_STATES_API \
+	(KERNEL_VERSION(6, 8, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_INIT_STATE \
+	(KERNEL_VERSION(6, 7, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_STREAMS_API \
+	(KERNEL_VERSION(6, 3, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_HDR_CTRL \
+	(KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_REMOVE_INT_RETURN \
+	(KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_ACTIVE_STATES \
+	(KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_SUBDEV_STATES \
+	(KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_DEV_ERR_PROBE \
+	(KERNEL_VERSION(5, 9, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_DEVICE_PROPERTIES \
+	(KERNEL_VERSION(5, 8, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_LOCKED_GRAB \
+	(KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE)
+#define KERNEL_LACKS_NEW_EP_ALLOC \
+	(KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE)
 
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -14,23 +39,48 @@
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
-
+#if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
 #include <asm/unaligned.h>
+#else
+#include <linux/unaligned.h>
+#endif
 
 #include <media/v4l2-async.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
+#include <media/v4l2-event.h>
 #include <media/v4l2-fwnode.h>
 #include <media/v4l2-subdev.h>
 
-/* Backward compatibility */
+#if KERNEL_VERSION(6, 9, 0) > LINUX_VERSION_CODE
+#define __pm_runtime_put_autosuspend(a) pm_runtime_put_autosuspend(a)
+#endif
+
+#if KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE
+#define container_of_const(a, b, c) container_of(a, b, c)
+#endif
+
+#if KERNEL_LACKS_CCI
+/*
+ * Warning : CCI_REGxy_LE definitions doesn't fit exactly with v4l2-cci.h .
+ * In fact endianness is managed directly in vd55g1_read/write() functions.
+ */
+#include <linux/bitfield.h>
+#define CCI_REG_ADDR_MASK		GENMASK(15, 0)
+#define CCI_REG_WIDTH_SHIFT		16
+#define CCI_REG_ADDR(x)			FIELD_GET(CCI_REG_ADDR_MASK, x)
+#define CCI_REG8(x)			((1 << CCI_REG_WIDTH_SHIFT) | (x))
+#define CCI_REG16_LE(x)			((2 << CCI_REG_WIDTH_SHIFT) | (x))
+#define CCI_REG32_LE(x)			((4 << CCI_REG_WIDTH_SHIFT) | (x))
+#else
+#include <media/v4l2-cci.h>
+#endif
+
 #if KERNEL_VERSION(5, 18, 0) > LINUX_VERSION_CODE
 #define MIPI_CSI2_DT_RAW8	0x2a
 #define MIPI_CSI2_DT_RAW10	0x2b
-#define MIPI_CSI2_DT_RAW12	0x2c
-#define MIPI_CSI2_DT_RAW14	0x2d
-#define MIPI_CSI2_DT_RAW16	0x2e
 #else
 #include <media/mipi-csi2.h>
 #endif
@@ -42,128 +92,394 @@
 #include <linux/units.h>
 #endif
 
-#define VD55G1_REG_8BIT(n)				((1 << 16) | (n))
-#define VD55G1_REG_16BIT(n)				((2 << 16) | (n))
-#define VD55G1_REG_32BIT(n)				((4 << 16) | (n))
-#define VD55G1_REG_SIZE_SHIFT				16
-#define VD55G1_REG_ADDR_MASK				0xffff
-
-#define VD55G1_REG_MODEL_ID				VD55G1_REG_32BIT(0x0000)
+/* Register Map */
+#define VD55G1_REG_MODEL_ID				CCI_REG32_LE(0x0000)
 #define VD55G1_MODEL_ID					0x53354731
-#define VD55G1_REG_REVISION				VD55G1_REG_16BIT(0x0004)
-#define VD55G1_REVISION_CUT_1				0x1010
-#define VD55G1_REVISION_CUT_2				0x2020
-#define VD55G1_REG_FWPATCH_REVISION			VD55G1_REG_16BIT(0x0012)
-#define VD55G1_REG_FWPATCH_START_ADDR			VD55G1_REG_8BIT(0x2000)
-#define VD55G1_REG_SYSTEM_FSM				VD55G1_REG_8BIT(0x001c)
+#define VD55G1_REG_REVISION				CCI_REG16_LE(0x0004)
+#define VD55G1_REVISION_CCB				0x2020
+#define VD55G1_REG_FWPATCH_REVISION			CCI_REG16_LE(0x0012)
+#define VD55G1_REG_FWPATCH_START_ADDR			CCI_REG8(0x2000)
+#define VD55G1_REG_SYSTEM_FSM				CCI_REG8(0x001c)
 #define VD55G1_SYSTEM_FSM_READY_TO_BOOT			0x01
 #define VD55G1_SYSTEM_FSM_SW_STBY			0x02
 #define VD55G1_SYSTEM_FSM_STREAMING			0x03
-#define VD55G1_REG_TEMPERATURE				VD55G1_REG_16BIT(0x003c)
-#define VD55G1_REG_BOOT					VD55G1_REG_8BIT(0x0200)
-#define VD55G1_BOOT_BOOT				1
+#define VD55G1_REG_TEMPERATURE				CCI_REG16_LE(0x003c)
+#define VD55G1_REG_BOOT					CCI_REG8(0x0200)
 #define VD55G1_BOOT_PATCH_SETUP				2
-#define VD55G1_REG_STBY					VD55G1_REG_8BIT(0x0201)
+#define VD55G1_REG_STBY					CCI_REG8(0x0201)
 #define VD55G1_STBY_START_STREAM			1
 #define VD55G1_STBY_THSENS_READ				4
-#define VD55G1_REG_STREAMING				VD55G1_REG_8BIT(0x0202)
+#define VD55G1_REG_STREAMING				CCI_REG8(0x0202)
 #define VD55G1_STREAMING_STOP_STREAM			1
-#define VD55G1_REG_EXT_CLOCK				VD55G1_REG_32BIT(0x0220)
-#define VD55G1_REG_LINE_LENGTH				VD55G1_REG_16BIT(0x0300)
-#define VD55G1_REG_ORIENTATION				VD55G1_REG_8BIT(0x0302)
-#define VD55G1_REG_FORMAT_CTRL				VD55G1_REG_8BIT(0x030a)
-#define VD55G1_REG_OIF_CTRL				VD55G1_REG_16BIT(0x030c)
-#define VD55G1_REG_OIF_IMG_CTRL				VD55G1_REG_8BIT(0x030f)
-#define VD55G1_REG_MIPI_DATA_RATE			VD55G1_REG_32BIT(0x0224)
-#define VD55G1_REG_PATGEN_CTRL				VD55G1_REG_16BIT(0x0304)
+#define VD55G1_REG_EXT_CLOCK				CCI_REG32_LE(0x0220)
+#define VD55G1_REG_LINE_LENGTH				CCI_REG16_LE(0x0300)
+#define VD55G1_REG_ORIENTATION				CCI_REG8(0x0302)
+#define VD55G1_REG_FORMAT_CTRL				CCI_REG8(0x030a)
+#define VD55G1_REG_OIF_CTRL				CCI_REG16_LE(0x030c)
+#define VD55G1_REG_ISL_ENABLE				CCI_REG16_LE(0x326)
+#define VD55G1_REG_OIF_IMG_CTRL				CCI_REG8(0x030f)
+#define VD55G1_REG_MIPI_DATA_RATE			CCI_REG32_LE(0x0224)
+#define VD55G1_REG_PATGEN_CTRL				CCI_REG16_LE(0x0304)
 #define VD55G1_PATGEN_TYPE_SHIFT			4
 #define VD55G1_PATGEN_ENABLE				BIT(0)
-#define VD55G1_REG_MANUAL_ANALOG_GAIN			VD55G1_REG_8BIT(0x0501)
-#define VD55G1_REG_MANUAL_COARSE_EXPOSURE		VD55G1_REG_16BIT(0x0502)
-#define VD55G1_REG_MANUAL_DIGITAL_GAIN			VD55G1_REG_16BIT(0x0504)
-#define VD55G1_REG_APPLIED_COARSE_EXPOSURE		VD55G1_REG_16BIT(0x00e8)
-#define VD55G1_REG_APPLIED_ANALOG_GAIN			VD55G1_REG_16BIT(0x00ea)
-#define VD55G1_REG_APPLIED_DIGITAL_GAIN			VD55G1_REG_16BIT(0x00ec)
-#define VD55G1_REG_AE_FORCE_COLDSTART			VD55G1_REG_16BIT(0x0308)
-#define VD55G1_REG_AE_COLDSTART_EXP_TIME		VD55G1_REG_32BIT(0x0374)
-#define VD55G1_REG_READOUT_CTRL				VD55G1_REG_8BIT(0x052e)
-#define VD55G1_REG_DARKCAL_CTRL				VD55G1_REG_8BIT(0x032a)
+#define VD55G1_REG_MANUAL_ANALOG_GAIN			CCI_REG8(0x0501)
+#define VD55G1_REG_MANUAL_COARSE_EXPOSURE		CCI_REG16_LE(0x0502)
+#define VD55G1_REG_MANUAL_DIGITAL_GAIN			CCI_REG16_LE(0x0504)
+#define VD55G1_REG_APPLIED_COARSE_EXPOSURE		CCI_REG16_LE(0x00e8)
+#define VD55G1_REG_APPLIED_ANALOG_GAIN			CCI_REG16_LE(0x00ea)
+#define VD55G1_REG_APPLIED_DIGITAL_GAIN			CCI_REG16_LE(0x00ec)
+#define VD55G1_REG_AE_FORCE_COLDSTART			CCI_REG16_LE(0x0308)
+#define VD55G1_REG_AE_COLDSTART_EXP_TIME		CCI_REG32_LE(0x0374)
+#define VD55G1_REG_READOUT_CTRL				CCI_REG8(0x052e)
+#define VD55G1_REG_DARKCAL_CTRL				CCI_REG8(0x032a)
 #define VD55G1_DARKCAL_BYPASS				0
 #define VD55G1_DARKCAL_AUTO				1
-#define VD55G1_REG_DUSTER_CTRL				VD55G1_REG_8BIT(0x03ea)
+#define VD55G1_REG_DUSTER_CTRL				CCI_REG8(0x03ea)
 #define VD55G1_DUSTER_ENABLE				BIT(0)
 #define VD55G1_DUSTER_DISABLE				0
 #define VD55G1_DUSTER_DYN_ENABLE			BIT(1)
 #define VD55G1_DUSTER_RING_ENABLE			BIT(4)
-#define VD55G1_REG_AE_TARGET_PERCENTAGE			VD55G1_REG_8BIT(0x0486)
-#define VD55G1_REG_VT_CTRL				VD55G1_REG_8BIT(0x0309)
-#define VD55G1_VT_SLAVE_GPIO				1
-#define VD55G1_REG_ERROR_CODE				VD55G1_REG_16BIT(0x0010)
-#define VD55G1_REG_NEXT_CTX				VD55G1_REG_16BIT(0x03e4)
-#define VD55G1_REG_EXPOSURE_USE_CASES			VD55G1_REG_8BIT(0x0312)
+#define VD55G1_REG_AE_TARGET_PERCENTAGE			CCI_REG8(0x0486)
+#define VD55G1_REG_VT_CTRL				CCI_REG8(0x0309)
+#define VD55G1_VTSLAVE_GPIO				0
+#define VD55G1_REG_NEXT_CTX				CCI_REG16_LE(0x03e4)
+#define VD55G1_REG_EXPOSURE_USE_CASES			CCI_REG8(0x0312)
 #define VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT		BIT(2)
+#define VD55G1_REG_EXPOSURE_MAX_COARSE			CCI_REG16_LE(0x0372)
+#define VD55G1_EXPOSURE_MAX_COARSE_DEF			0x7fff
+#define VD55G1_EXPOSURE_MAX_COARSE_SUB			446
+#define VD55G1_REG_CTX_REPEAT_COUNT_CTX0		CCI_REG16_LE(0x03dc)
+#define VD55G1_REG_CTX_REPEAT_COUNT_CTX1		CCI_REG16_LE(0x03de)
 
 #define VD55G1_REG_EXP_MODE(ctx) \
-	VD55G1_REG_8BIT(0x0500 + VD55G1_CTX_OFFSET * (ctx))
-#define VD55G1_EXP_MODE_AUTO				0
-#define VD55G1_EXP_MODE_FREEZE				1
-#define VD55G1_EXP_MODE_MANUAL				2
+	CCI_REG8(0x0500 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_FRAME_LENGTH(ctx) \
-	VD55G1_REG_32BIT(0x050c + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG32_LE(0x050c + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_X_START(ctx) \
-	VD55G1_REG_16BIT(0x0514 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG16_LE(0x0514 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_X_WIDTH(ctx) \
-	VD55G1_REG_16BIT(0x0516 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG16_LE(0x0516 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_Y_START(ctx) \
-	VD55G1_REG_16BIT(0x0510 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG16_LE(0x0510 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_Y_HEIGHT(ctx) \
-	VD55G1_REG_16BIT(0x0512 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG16_LE(0x0512 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_GPIO_0_CTRL(ctx) \
-	VD55G1_REG_8BIT(0x051d + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG8(0x051d + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_DARKCAL_PEDESTAL(ctx) \
-	VD55G1_REG_16BIT(0x0526 + VD55G1_CTX_OFFSET * (ctx))
-#define VD55G1_REG_CTX_REPEAT_COUNT(ctx) \
-	VD55G1_REG_16BIT(0x03dc + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG16_LE(0x0526 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_VT_MODE(ctx) \
-	VD55G1_REG_8BIT(0x0536 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG8(0x0536 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_VT_MODE_NORMAL 0
 #define VD55G1_VT_MODE_SUBTRACTION 1
 #define VD55G1_REG_MASK_FRAME_CTRL(ctx) \
-	VD55G1_REG_8BIT(0x0537 + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG8(0x0537 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_MASK_FRAME_CTRL_OUTPUT 0
 #define VD55G1_MASK_FRAME_CTRL_MASK 1
 #define VD55G1_REG_EXPOSURE_INSTANCE(ctx) \
-	VD55G1_REG_32BIT(0x52D + VD55G1_CTX_OFFSET * (ctx))
+	CCI_REG32_LE(0x52D + VD55G1_CTX_OFFSET * (ctx))
 
 #define VD55G1_WIDTH					804
 #define VD55G1_HEIGHT					704
-#define VD55G1_DEFAULT_MODE				1
-#define VD55G1_WRITE_MULTIPLE_CHUNK_MAX			16
+#define VD55G1_DEFAULT_MODE				0
 #define VD55G1_NB_GPIOS					4
-#define VD55G1_NB_POLARITIES				3
-#define VD55G1_MIN_VBLANK				86
-#define VD55G1_FRAME_LENGTH_DEF				1860 /* 60 fps */
-#define VD55G1_TIMEOUT_MS				500
 #define VD55G1_MEDIA_BUS_FMT_DEF			MEDIA_BUS_FMT_Y8_1X8
 #define VD55G1_DARKCAL_PEDESTAL_DEF			0x40
+#define VD55G1_DGAIN_DEF				256
+#define VD55G1_AGAIN_DEF				19
 #define VD55G1_EXPO_MAX_TERM				64
 #define VD55G1_EXPO_DEF					500
-#define VD55G1_MIN_LINE_LENGTH				1128
-#define VD55G1_MIN_LINE_LENGTH_SUB			1344
+#define VD55G1_LINE_LENGTH_MIN				1128
+#define VD55G1_LINE_LENGTH_SUB_MIN			1344
+#define VD55G1_VBLANK_MIN				86
+#define VD55G1_VBLANK_MAX				0xffff
+#define VD55G1_FRAME_LENGTH_DEF				1860 /* 60 fps */
 #define VD55G1_MIPI_MARGIN				900
-#define VD55G1_PCLK_DIVISOR				5
 #define VD55G1_CTX_OFFSET				0x50
+#define VD55G1_FWPATCH_REVISION_MAJOR			2
+#define VD55G1_FWPATCH_REVISION_MINOR			9
 
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
-#define V4L2_CID_SLAVE				(V4L2_CID_USER_BASE | 0x1022)
-#if KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE
+#define V4L2_CID_SLAVE_MODE			(V4L2_CID_USER_BASE | 0x1022)
+#if KERNEL_LACKS_HDR_CTRL
 #define V4L2_CID_HDR_SENSOR_MODE		(V4L2_CID_USER_BASE | 0x1004)
 #endif
 
-#include "vd55g1_patch.c"
+static const u8 patch_array[] = {
+0x44, 0x03, 0x09, 0x02, 0xe6, 0x01, 0x42, 0x00, 0xea, 0x01, 0x42, 0x00, 0xf0,
+0x01, 0x42, 0x00, 0xe6, 0x01, 0x42, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x4c, 0x00, 0x00,
+0xfa, 0x68, 0x40, 0x00, 0xe8, 0x09, 0xbe, 0x4c, 0x08, 0x00, 0xf2, 0x93, 0xdd,
+0x1c, 0x00, 0xc0, 0xe2, 0x93, 0xdd, 0xc3, 0xc1, 0x0c, 0x04, 0x00, 0xfa, 0x6b,
+0x80, 0x98, 0x7f, 0xfc, 0xef, 0x11, 0xc1, 0x0f, 0x82, 0x69, 0xbe, 0x0f, 0xac,
+0x58, 0x40, 0x00, 0xe8, 0x0c, 0x0c, 0x00, 0xf2, 0x93, 0xdd, 0x1c, 0x00, 0x40,
+0xe3, 0x93, 0xdd, 0xc3, 0xc1, 0x0c, 0x04, 0x84, 0xfa, 0x46, 0x0e, 0xe8, 0xe0,
+0x08, 0xde, 0x4a, 0x40, 0x84, 0xe0, 0xa5, 0x86, 0xa8, 0x7d, 0xfc, 0xef, 0x6b,
+0x80, 0x01, 0xbf, 0x28, 0x77, 0x0c, 0xef, 0x0b, 0x0e, 0x21, 0x78, 0x06, 0xc0,
+0x0b, 0xa5, 0xb5, 0x84, 0x06, 0x42, 0x98, 0xe1, 0x01, 0x81, 0x01, 0x42, 0x38,
+0xe0, 0x0c, 0xc4, 0x0e, 0x84, 0x46, 0x02, 0x84, 0xe0, 0x0c, 0x84, 0x11, 0x81,
+0x21, 0x81, 0x31, 0x81, 0x41, 0x81, 0x51, 0x81, 0xc1, 0x81, 0x05, 0x83, 0x0c,
+0x0c, 0x84, 0xf2, 0x93, 0xdd, 0x06, 0x40, 0x98, 0xe1, 0xc8, 0x80, 0x58, 0x82,
+0x48, 0xc0, 0x38, 0xc2, 0x29, 0x00, 0x10, 0xe0, 0x19, 0x00, 0x14, 0xe0, 0x09,
+0x00, 0x38, 0xe0, 0x5f, 0xb8, 0x5f, 0xa8, 0x5f, 0xa6, 0x5f, 0xa4, 0x5f, 0xa2,
+0x5f, 0xa0, 0x56, 0x41, 0x98, 0xe1, 0x18, 0x82, 0x28, 0x80, 0x38, 0xc0, 0x5f,
+0xa2, 0x19, 0x00, 0x20, 0xf8, 0x5f, 0xa4, 0x28, 0xc2, 0x5f, 0xa6, 0x39, 0x00,
+0x10, 0xe0, 0x5f, 0xa2, 0x19, 0x00, 0x14, 0xe0, 0x5f, 0xa4, 0x29, 0x00, 0x18,
+0xe0, 0x5f, 0xa6, 0x39, 0x00, 0x40, 0xe0, 0x5f, 0xa2, 0x19, 0x00, 0x44, 0xe0,
+0x5f, 0xa4, 0x29, 0x00, 0x1c, 0xe0, 0x5f, 0xa6, 0x39, 0x00, 0x38, 0xe0, 0x5f,
+0xa2, 0x19, 0x00, 0x20, 0xe0, 0x5f, 0xa4, 0x29, 0x00, 0x24, 0xe0, 0x5f, 0xa6,
+0x39, 0x00, 0x28, 0xe0, 0x5f, 0xa2, 0x19, 0x00, 0x2c, 0xe0, 0x5f, 0xa4, 0x29,
+0x00, 0x30, 0xe0, 0x5f, 0xa6, 0x09, 0x00, 0x34, 0xe0, 0x5f, 0xa2, 0x5f, 0xa4,
+0x5f, 0xa0, 0x4a, 0x0a, 0xfc, 0xfb, 0xe5, 0x82, 0x08, 0xde, 0x4a, 0x40, 0x88,
+0xe0, 0xf6, 0x40, 0x00, 0xe0, 0x01, 0x4e, 0x99, 0x78, 0x0a, 0xc0, 0x85, 0x80,
+0x98, 0x40, 0x00, 0xe8, 0x35, 0x81, 0xa8, 0x40, 0x00, 0xe8, 0x0b, 0x8c, 0x0c,
+0x0c, 0x84, 0xf2, 0xd5, 0xed, 0x83, 0xc1, 0x13, 0xc5, 0x93, 0xdd, 0xc3, 0xc1,
+0x83, 0xc1, 0x13, 0xc3, 0x93, 0xdd, 0xc3, 0xc1, 0x4c, 0x04, 0x04, 0xfa, 0xc6,
+0x0f, 0x94, 0xe0, 0x19, 0x0e, 0xc9, 0x65, 0x01, 0xc0, 0x28, 0xde, 0x0a, 0x42,
+0x80, 0xe0, 0x24, 0x02, 0x00, 0xfc, 0x16, 0xde, 0xa5, 0x8a, 0x19, 0x00, 0xb8,
+0xe0, 0x10, 0x02, 0x0c, 0xec, 0x1d, 0xe6, 0x14, 0x02, 0x88, 0x80, 0x4e, 0x04,
+0x01, 0x00, 0x10, 0x80, 0x25, 0x02, 0x08, 0x9c, 0x86, 0x02, 0x00, 0x80, 0x08,
+0x44, 0x00, 0x98, 0x55, 0x81, 0x11, 0x85, 0x45, 0x81, 0x11, 0x89, 0x25, 0x81,
+0x11, 0x83, 0x2b, 0x00, 0x24, 0xe0, 0x64, 0xc2, 0x0b, 0x84, 0x08, 0x51, 0x00,
+0xef, 0x2b, 0x80, 0x01, 0x83, 0x1b, 0x8c, 0x38, 0x7d, 0x5c, 0xef, 0x18, 0xde,
+0x0b, 0xa1, 0x25, 0x82, 0x0b, 0x0e, 0x88, 0xf9, 0x0a, 0x00, 0x00, 0xe8, 0x10,
+0x42, 0x04, 0x9c, 0x11, 0x4e, 0x0c, 0x80, 0x10, 0x40, 0x04, 0xf0, 0x4e, 0x05,
+0x01, 0x60, 0x10, 0xc0, 0x06, 0x88, 0x10, 0x40, 0xf8, 0xf3, 0x06, 0xde, 0x4c,
+0x0c, 0x04, 0xf2, 0x93, 0xdd, 0x0c, 0x04, 0x1c, 0xfe, 0xf6, 0x0f, 0x94, 0xe0,
+0x38, 0x9c, 0x46, 0x51, 0xfc, 0xe0, 0x46, 0x49, 0x38, 0xe2, 0x30, 0x46, 0xf8,
+0xf3, 0x36, 0x9c, 0xc6, 0x46, 0x0c, 0xe1, 0x34, 0x8c, 0x94, 0xa0, 0x4e, 0xa0,
+0x39, 0x06, 0x80, 0xe0, 0x4a, 0x46, 0x94, 0xe0, 0x05, 0x8c, 0x6a, 0x40, 0x80,
+0xe0, 0x2c, 0x0c, 0x00, 0xe2, 0x0b, 0x8c, 0xb8, 0x7c, 0x5c, 0xef, 0x0b, 0x8c,
+0x9e, 0xa0, 0xf8, 0x40, 0x60, 0xef, 0x0b, 0xa1, 0x5a, 0x40, 0x80, 0xe0, 0x65,
+0x88, 0x28, 0x02, 0x01, 0x40, 0x00, 0x80, 0x2a, 0x42, 0x9c, 0xe1, 0x28, 0x49,
+0x60, 0xef, 0x96, 0x4d, 0x9c, 0xe1, 0x01, 0x81, 0x06, 0x98, 0xd5, 0x81, 0x09,
+0x0e, 0xa1, 0x64, 0x01, 0xc0, 0x4a, 0x40, 0x88, 0xe0, 0x85, 0x80, 0xb8, 0x77,
+0xfc, 0xef, 0x35, 0x81, 0xc8, 0x77, 0xfc, 0xef, 0x08, 0x98, 0x4a, 0x00, 0xfc,
+0xfb, 0x55, 0xfc, 0xe8, 0x4a, 0x60, 0xef, 0x1a, 0x44, 0x9c, 0xe1, 0x35, 0x81,
+0x1a, 0x4e, 0x9c, 0xe9, 0x1c, 0x00, 0x00, 0xe2, 0x0c, 0x0c, 0x1c, 0xf6, 0x93,
+0xdd, 0x0d, 0xc3, 0x1a, 0x41, 0x08, 0xe4, 0x0a, 0x40, 0x84, 0xe1, 0x0c, 0x00,
+0x00, 0xe2, 0x93, 0xdd, 0x4c, 0x04, 0x1c, 0xfa, 0x86, 0x52, 0xec, 0xe1, 0x08,
+0xa6, 0x65, 0x12, 0x24, 0xf8, 0x0e, 0x02, 0x99, 0x7a, 0x00, 0xc0, 0x00, 0x40,
+0xa0, 0xf3, 0x06, 0xa6, 0x0b, 0x8c, 0x08, 0x49, 0x00, 0xef, 0x85, 0x12, 0x28,
+0xf8, 0x02, 0x02, 0xfc, 0xed, 0xf6, 0x47, 0xfd, 0x6f, 0xe0, 0xff, 0x04, 0xe2,
+0x14, 0x04, 0xc0, 0xe0, 0x0f, 0x86, 0x2f, 0xa0, 0x0b, 0x8c, 0x2e, 0xe2, 0x08,
+0x48, 0x00, 0xef, 0x86, 0x02, 0x84, 0xfe, 0x0e, 0x05, 0x09, 0x7d, 0x00, 0xc0,
+0x05, 0x52, 0x08, 0xf8, 0x18, 0x7d, 0xfc, 0xef, 0x4a, 0x40, 0x80, 0xe0, 0x09,
+0x12, 0x04, 0xc0, 0x65, 0x12, 0x20, 0xf8, 0x00, 0x40, 0x40, 0xdc, 0x01, 0x52,
+0x04, 0xc0, 0x0e, 0x00, 0x41, 0x78, 0xf5, 0xc5, 0x6d, 0xc0, 0xb5, 0x82, 0x05,
+0x10, 0x10, 0xe0, 0x11, 0xf1, 0x0f, 0x82, 0x05, 0x50, 0x10, 0xe0, 0x05, 0x10,
+0x10, 0xe0, 0xfe, 0x02, 0xf0, 0xff, 0x0f, 0x82, 0x85, 0x83, 0x15, 0x10, 0x10,
+0xe0, 0x16, 0x00, 0x91, 0x6e, 0x69, 0xcd, 0x21, 0xf1, 0x6d, 0xc1, 0x01, 0x83,
+0x2f, 0x82, 0x26, 0x00, 0x00, 0x80, 0x2f, 0xa0, 0x25, 0x50, 0x10, 0xe0, 0x05,
+0x10, 0x10, 0xe0, 0x11, 0xa1, 0xfe, 0x04, 0xf0, 0xff, 0x06, 0x42, 0x00, 0x80,
+0x0f, 0x84, 0x0f, 0xa2, 0x05, 0x50, 0x10, 0xe0, 0x16, 0x00, 0x91, 0x6e, 0x69,
+0xcd, 0x6d, 0xc1, 0x71, 0x8d, 0x16, 0x00, 0x79, 0x61, 0x2d, 0xcb, 0x86, 0x0e,
+0x00, 0x80, 0x6d, 0xc1, 0x56, 0x0e, 0x00, 0xc0, 0x0b, 0x8c, 0x1b, 0x8e, 0x71,
+0x52, 0x0c, 0xf8, 0x08, 0x43, 0x00, 0xef, 0x05, 0x52, 0x14, 0xf8, 0x15, 0x10,
+0x28, 0xe0, 0x70, 0x04, 0x04, 0xec, 0x31, 0xe1, 0x29, 0x9e, 0x1f, 0x86, 0x1f,
+0xa4, 0x15, 0x50, 0x28, 0xe0, 0x86, 0x42, 0x3c, 0xe0, 0x0e, 0x04, 0x9d, 0x64,
+0x9b, 0xc2, 0x05, 0x52, 0x1c, 0xf8, 0x78, 0xa6, 0x48, 0x77, 0xfc, 0xef, 0x4a,
+0x40, 0x80, 0xe0, 0x70, 0x4e, 0x10, 0xdc, 0x1e, 0x00, 0x81, 0x70, 0xeb, 0xcb,
+0x70, 0x4e, 0xec, 0x93, 0x6d, 0xc1, 0x11, 0x85, 0x36, 0x02, 0x00, 0x80, 0x76,
+0xa6, 0x11, 0x52, 0x10, 0xf8, 0x05, 0x10, 0x40, 0xe0, 0xfe, 0x47, 0x0c, 0xff,
+0x14, 0x04, 0xa0, 0xe0, 0x0f, 0x86, 0x0f, 0xa4, 0x05, 0x50, 0x40, 0xe0, 0x05,
+0x10, 0x28, 0xe0, 0xfe, 0x47, 0xfd, 0x7f, 0xe3, 0xff, 0x14, 0x04, 0xd0, 0xe0,
+0x0f, 0x86, 0x2f, 0xa0, 0x20, 0x00, 0x01, 0x6c, 0x00, 0xd0, 0x05, 0x50, 0x28,
+0xe0, 0x0b, 0x8c, 0xf8, 0x7e, 0xfc, 0xee, 0x0e, 0x03, 0x59, 0x78, 0xf5, 0xc5,
+0x0d, 0xc2, 0x05, 0x52, 0x0c, 0xf8, 0x08, 0xa6, 0x46, 0x42, 0xb4, 0xe0, 0x18,
+0x84, 0x00, 0x40, 0xf4, 0x93, 0x00, 0x40, 0x08, 0xdc, 0x1b, 0xa1, 0x06, 0xa6,
+0x05, 0x10, 0x40, 0x80, 0x04, 0x00, 0x50, 0x9c, 0x65, 0x8a, 0x05, 0x10, 0x44,
+0xe0, 0xf6, 0x43, 0xfd, 0x6f, 0x00, 0xf8, 0x0f, 0x82, 0x06, 0x02, 0x01, 0x60,
+0x1e, 0xc0, 0x0f, 0xa2, 0x05, 0x50, 0x44, 0xe0, 0x05, 0x10, 0x44, 0xe0, 0x0e,
+0x02, 0x00, 0xf8, 0x0f, 0x82, 0x09, 0xf6, 0x05, 0x50, 0x44, 0xe0, 0x05, 0x10,
+0x40, 0xe0, 0x04, 0x00, 0x54, 0xfc, 0x05, 0x50, 0x40, 0xe0, 0x05, 0x10, 0x40,
+0xe0, 0x04, 0x00, 0xcc, 0xfc, 0x05, 0x50, 0x40, 0xe0, 0x05, 0x10, 0x40, 0xe0,
+0x04, 0x00, 0x4c, 0xfc, 0x05, 0x50, 0x40, 0xe0, 0x05, 0x10, 0x40, 0xe0, 0x04,
+0x00, 0xd0, 0xfc, 0x05, 0x50, 0x40, 0xe0, 0x4c, 0x0c, 0x1c, 0xf2, 0x93, 0xdd,
+0xc3, 0xc1, 0xc6, 0x40, 0xfc, 0xe0, 0x04, 0x80, 0xc6, 0x44, 0x0c, 0xe1, 0x15,
+0x04, 0x0c, 0xf8, 0x0a, 0x80, 0x06, 0x07, 0x04, 0xe0, 0x03, 0x42, 0x48, 0xe1,
+0x46, 0x02, 0x40, 0xe2, 0x08, 0xc6, 0x44, 0x88, 0x06, 0x46, 0x0e, 0xe0, 0x86,
+0x01, 0x84, 0xe0, 0x33, 0x80, 0x39, 0x06, 0xd8, 0xef, 0x0a, 0x46, 0x80, 0xe0,
+0x31, 0xbf, 0x06, 0x06, 0x00, 0xc0, 0x31, 0x48, 0x60, 0xe0, 0x34, 0x88, 0x49,
+0x06, 0x40, 0xe1, 0x40, 0x48, 0x7c, 0xf3, 0x41, 0x46, 0x40, 0xe1, 0x24, 0x8a,
+0x39, 0x04, 0x10, 0xe0, 0x39, 0xc2, 0x31, 0x44, 0x10, 0xe0, 0x14, 0xc4, 0x1b,
+0xa5, 0x11, 0x83, 0x11, 0x40, 0x25, 0x6a, 0x01, 0xc0, 0x08, 0x5c, 0x00, 0xda,
+0x15, 0x00, 0xcc, 0xe0, 0x25, 0x00, 0xf8, 0xe0, 0x1b, 0x85, 0x08, 0x5c, 0x00,
+0x9a, 0x4e, 0x03, 0x01, 0x60, 0x10, 0xc0, 0x29, 0x00, 0x1c, 0xe4, 0x18, 0x84,
+0x20, 0x44, 0xf8, 0xf3, 0x2f, 0xa2, 0x21, 0x40, 0x1c, 0xe4, 0x93, 0xdd, 0x0c,
+0x00, 0x80, 0xfa, 0x15, 0x00, 0x3c, 0xe0, 0x21, 0x81, 0x31, 0x85, 0x21, 0x42,
+0x60, 0xe0, 0x15, 0x00, 0x44, 0xe0, 0x31, 0x42, 0x40, 0xe1, 0x15, 0x00, 0x34,
+0xe0, 0x21, 0x42, 0x20, 0xe0, 0x15, 0x00, 0x34, 0xe0, 0xd6, 0x04, 0x10, 0xe0,
+0x23, 0x42, 0x30, 0xe0, 0x15, 0x00, 0x34, 0xe0, 0x86, 0x44, 0x04, 0xe0, 0x23,
+0x42, 0x38, 0xe0, 0x05, 0x00, 0x30, 0xe0, 0xc6, 0x02, 0x08, 0xe0, 0x13, 0x40,
+0x10, 0xe3, 0xe8, 0x56, 0x40, 0xef, 0x06, 0x40, 0x0c, 0xe1, 0x04, 0x80, 0x06,
+0x02, 0x94, 0xe0, 0x2b, 0x02, 0xc4, 0xea, 0x3b, 0x00, 0x78, 0xe2, 0x20, 0x44,
+0xfd, 0x73, 0x07, 0xc0, 0x30, 0x46, 0x01, 0x70, 0xf8, 0xc0, 0x3f, 0xa4, 0x33,
+0x40, 0x78, 0xe2, 0x0a, 0x84, 0x0c, 0x08, 0x80, 0xf2, 0xf8, 0x3b, 0x3c, 0xff,
+0xc3, 0xc1, 0x06, 0x40, 0x0c, 0xe1, 0x04, 0x80, 0x1b, 0x00, 0x40, 0xe4, 0x19,
+0xc2, 0x13, 0x40, 0x40, 0xe4, 0x1b, 0x00, 0x40, 0xe4, 0x19, 0xc4, 0x13, 0x40,
+0x40, 0xe4, 0x93, 0xdd, 0xc6, 0x43, 0xec, 0xe0, 0x46, 0x41, 0xfc, 0xe0, 0x24,
+0x84, 0x04, 0x80, 0x31, 0x81, 0x4a, 0x44, 0x80, 0xe0, 0x86, 0x44, 0x0c, 0xe1,
+0x09, 0x00, 0x6c, 0xe0, 0xc4, 0x8a, 0x8e, 0x47, 0xfc, 0x9f, 0x01, 0x42, 0x51,
+0x78, 0x0c, 0xc0, 0x31, 0x58, 0x90, 0xe0, 0x34, 0x8a, 0x41, 0xbf, 0x06, 0x08,
+0x00, 0xc0, 0x41, 0x46, 0xa0, 0xe0, 0x34, 0x8a, 0x51, 0x81, 0xf6, 0x0b, 0x00,
+0xc0, 0x51, 0x46, 0xd0, 0xe0, 0x34, 0x8a, 0x01, 0xbf, 0x51, 0x46, 0xe0, 0xe0,
+0x44, 0x84, 0x0a, 0x48, 0x84, 0xe0, 0x75, 0x86, 0x54, 0xca, 0x49, 0x88, 0x44,
+0x06, 0x88, 0xe1, 0x36, 0x94, 0x4a, 0x46, 0x80, 0xe0, 0x34, 0xca, 0x47, 0xc6,
+0x11, 0x8d, 0x41, 0x46, 0xd0, 0xe0, 0x34, 0x88, 0x76, 0x02, 0x00, 0xc0, 0x06,
+0x00, 0x00, 0xc0, 0x16, 0x8c, 0x14, 0x88, 0x01, 0x42, 0xc0, 0xe1, 0x01, 0x42,
+0xe0, 0xe1, 0x01, 0x42, 0xf0, 0xe1, 0x93, 0xdd, 0x34, 0xca, 0x41, 0x85, 0x46,
+0x8c, 0x34, 0xca, 0x06, 0x48, 0x00, 0xe0, 0x41, 0x46, 0xd0, 0xe0, 0x34, 0x88,
+0x41, 0x83, 0x46, 0x8c, 0x34, 0x88, 0x01, 0x46, 0xc0, 0xe1, 0x01, 0x46, 0xe0,
+0xe1, 0x01, 0x46, 0xf0, 0xe1, 0x09, 0x02, 0x20, 0xe0, 0x14, 0xca, 0x03, 0x42,
+0x58, 0xe0, 0x93, 0xdd, 0xc3, 0xc1, 0x4c, 0x04, 0x04, 0xfa, 0x46, 0x4e, 0x08,
+0xe1, 0x06, 0x4c, 0x0c, 0xe1, 0x0a, 0x9e, 0x14, 0x98, 0x05, 0x42, 0x44, 0xe0,
+0x10, 0x00, 0xe1, 0x65, 0x03, 0xc0, 0x78, 0x41, 0x00, 0xe8, 0x08, 0x9c, 0x0b,
+0xa1, 0x04, 0x98, 0x06, 0x02, 0x10, 0x80, 0x13, 0x40, 0xf8, 0x86, 0x65, 0x82,
+0x00, 0x00, 0xe1, 0x65, 0x03, 0xc0, 0xa8, 0x40, 0x00, 0xe8, 0x14, 0x98, 0x04,
+0x00, 0xa0, 0xfc, 0x03, 0x42, 0x00, 0xe7, 0x4c, 0x0c, 0x04, 0xf2, 0x93, 0xdd,
+0x0a, 0x80, 0x93, 0xdd, 0x0c, 0x04, 0x00, 0xfa, 0x06, 0x02, 0xec, 0xe1, 0x64,
+0x84, 0x15, 0x0c, 0x2c, 0xe0, 0x14, 0x02, 0xa0, 0xfc, 0x15, 0x4c, 0x2c, 0xe0,
+0xd8, 0x40, 0x00, 0xe8, 0x14, 0xd8, 0x09, 0x82, 0x14, 0x02, 0x00, 0xfc, 0x1f,
+0xa0, 0x1e, 0xd8, 0x01, 0x85, 0x0c, 0x0c, 0x00, 0xf2, 0xe8, 0x32, 0x2c, 0xff,
+0x93, 0xdd, 0xc3, 0xc1, 0x0c, 0x04, 0x00, 0xfa, 0x6b, 0x80, 0xf6, 0x01, 0x94,
+0xe0, 0x08, 0x80, 0x4a, 0x40, 0x80, 0xe0, 0x45, 0x86, 0x06, 0x40, 0x0c, 0xe1,
+0x04, 0x80, 0xc6, 0x02, 0x40, 0xe2, 0x09, 0x00, 0xd0, 0xe0, 0x14, 0x84, 0x1b,
+0xa5, 0x15, 0x84, 0x07, 0xc5, 0x09, 0x82, 0x18, 0x41, 0x00, 0xe8, 0x46, 0x43,
+0xfc, 0xe0, 0x14, 0x84, 0x19, 0x02, 0xd8, 0xe0, 0x19, 0x82, 0x0b, 0x83, 0x16,
+0x00, 0x00, 0xc0, 0x01, 0x4c, 0x00, 0xc0, 0x0c, 0x0c, 0x00, 0xf2, 0x93, 0xdd,
+0xc3, 0xc1, 0x4a, 0x00, 0x00, 0xe0, 0x0c, 0x00, 0x00, 0xe2, 0x93, 0xdd, 0xc3,
+0xc1, 0x46, 0x40, 0x84, 0xe0, 0x11, 0xaf, 0x13, 0x40, 0x6c, 0xec, 0x11, 0xb3,
+0x13, 0x40, 0x70, 0xec, 0xc6, 0x43, 0xf0, 0xe0, 0x13, 0x40, 0xdc, 0xec, 0xc6,
+0x02, 0x24, 0xe0, 0x1c, 0x80, 0x93, 0xdd, 0x4c, 0x00, 0x00, 0xfa, 0xc8, 0x60,
+0x7c, 0xef, 0xe8, 0x61, 0x7c, 0xef, 0x28, 0x7e, 0x80, 0xef, 0xc6, 0x40, 0x98,
+0xe1, 0x11, 0x83, 0x16, 0x80, 0x46, 0x01, 0x10, 0xe1, 0x11, 0x81, 0x16, 0x80,
+0x4c, 0x08, 0x00, 0xf2, 0x93, 0xdd, 0xc3, 0xc1, 0x0c, 0x04, 0x0c, 0xfa, 0x6b,
+0x80, 0x04, 0x98, 0x7b, 0x82, 0x56, 0x42, 0xb4, 0xe0, 0x88, 0x84, 0x05, 0x00,
+0x10, 0xe0, 0x09, 0x86, 0x0b, 0xa5, 0x46, 0x02, 0x00, 0x80, 0x06, 0x05, 0x00,
+0x80, 0x25, 0x82, 0x0b, 0xa3, 0xa5, 0x80, 0x0b, 0xa1, 0x06, 0x00, 0xf4, 0xef,
+0xd5, 0x84, 0x11, 0x85, 0x21, 0x91, 0x0b, 0x8e, 0x88, 0x74, 0x10, 0xef, 0x0b,
+0xa1, 0xf5, 0x82, 0x0a, 0x9e, 0x1a, 0x9c, 0x24, 0x98, 0x07, 0xe0, 0x0f, 0xa2,
+0x0e, 0xca, 0x0a, 0xde, 0x1a, 0xdc, 0x24, 0x98, 0x03, 0xb0, 0x07, 0xe0, 0x0f,
+0xa2, 0x0e, 0xc8, 0x01, 0x81, 0x0c, 0x0c, 0x0c, 0xf2, 0x93, 0xdd, 0xc3, 0xc1,
+0x0c, 0x04, 0x7c, 0xfa, 0x46, 0x42, 0x9c, 0xe0, 0x0b, 0x02, 0x04, 0xe3, 0xf0,
+0x1e, 0x30, 0xec, 0x0b, 0xa3, 0x35, 0x96, 0x8e, 0x01, 0x01, 0x60, 0x10, 0xc0,
+0x0e, 0xfc, 0xc6, 0x05, 0xd0, 0xe1, 0x0b, 0x82, 0x31, 0x81, 0x10, 0x16, 0x00,
+0xe5, 0x20, 0x10, 0x20, 0xe7, 0x0e, 0xbe, 0xb5, 0x85, 0x94, 0xfc, 0xa4, 0xbe,
+0x82, 0x4c, 0x9c, 0xf0, 0x05, 0x0c, 0x40, 0xe0, 0x11, 0x89, 0x93, 0x8e, 0xa3,
+0x8e, 0x58, 0x44, 0x00, 0xe8, 0x15, 0x0c, 0xc0, 0xf8, 0x04, 0x0c, 0x80, 0xfb,
+0x0c, 0xed, 0x0b, 0x82, 0x1b, 0x8c, 0x48, 0x44, 0x00, 0xe8, 0x15, 0x10, 0x1c,
+0xfc, 0x0e, 0xa8, 0x0b, 0x82, 0x1b, 0x8c, 0xd8, 0x43, 0x00, 0xe8, 0x71, 0x88,
+0x0e, 0xa4, 0x0a, 0x0e, 0x40, 0xe0, 0x35, 0xf8, 0x04, 0xbe, 0x14, 0xbc, 0x81,
+0xa0, 0x03, 0x8e, 0x0e, 0xbe, 0x04, 0xfc, 0x11, 0x82, 0x3b, 0x82, 0x03, 0x8e,
+0x0e, 0xfc, 0x3b, 0xa9, 0x06, 0x0e, 0x00, 0xc0, 0x35, 0x5e, 0x00, 0xc0, 0xd5,
+0xfa, 0xc6, 0x01, 0xd0, 0xe1, 0x7b, 0x80, 0x04, 0x9e, 0x11, 0x91, 0x98, 0x41,
+0x00, 0xe8, 0x24, 0x9c, 0x46, 0x42, 0x9c, 0xe0, 0x6b, 0x82, 0x03, 0x4c, 0xc4,
+0xe0, 0x11, 0x91, 0x0b, 0x84, 0xf8, 0x40, 0x00, 0xe8, 0x19, 0x0e, 0x20, 0xe5,
+0x03, 0x4c, 0xc0, 0xe0, 0x0b, 0x82, 0x08, 0x72, 0xfc, 0xef, 0x01, 0x4c, 0x24,
+0xf9, 0xf1, 0x98, 0x0c, 0x0c, 0x7c, 0xf2, 0x93, 0xdd, 0x4c, 0x00, 0x00, 0xfa,
+0x48, 0x65, 0x2c, 0xef, 0x4c, 0x08, 0x00, 0xf2, 0x93, 0xdd, 0xc3, 0xc1, 0x0c,
+0x04, 0x00, 0xfa, 0x6b, 0x82, 0x78, 0x6e, 0xfc, 0xee, 0x46, 0x42, 0xec, 0xe0,
+0x24, 0x84, 0x24, 0x02, 0x80, 0xfa, 0x1d, 0xcc, 0x11, 0x83, 0xf5, 0x82, 0x24,
+0x02, 0xa0, 0xe1, 0x14, 0x02, 0x80, 0xfa, 0x1d, 0xcc, 0x11, 0x85, 0x15, 0x82,
+0x27, 0xe1, 0x24, 0x02, 0x80, 0xfa, 0x1d, 0xcc, 0x11, 0x89, 0x86, 0x02, 0x00,
+0x80, 0x0c, 0x0c, 0x00, 0xf2, 0x18, 0x17, 0xfc, 0xfe, 0xc3, 0xc1, 0x0c, 0x04,
+0x00, 0xfa, 0x06, 0x41, 0x8c, 0xe0, 0x1b, 0x00, 0xec, 0xe4, 0x1b, 0xa3, 0x75,
+0x84, 0x11, 0x81, 0x8e, 0x05, 0x01, 0x60, 0x10, 0xc0, 0x00, 0x06, 0xc0, 0xe5,
+0x95, 0x81, 0x44, 0x88, 0x1d, 0xee, 0x75, 0x80, 0x4e, 0xc1, 0x25, 0x81, 0x4e,
+0xcd, 0x21, 0x88, 0x11, 0x82, 0x0a, 0x02, 0x40, 0xe0, 0xd5, 0xfc, 0x56, 0x00,
+0x00, 0xe1, 0x18, 0x80, 0x1b, 0xa1, 0xc5, 0x84, 0x08, 0x82, 0x4a, 0x00, 0xfc,
+0xfb, 0x45, 0x84, 0x86, 0x4d, 0x84, 0xe1, 0x04, 0x98, 0x05, 0x00, 0x10, 0xe0,
+0x4a, 0x40, 0x80, 0xe0, 0x45, 0x82, 0x11, 0x81, 0x0b, 0x8c, 0x58, 0x76, 0x28,
+0xef, 0x0b, 0x8c, 0x0c, 0x0c, 0x00, 0xf2, 0x88, 0x35, 0x28, 0xff, 0x0c, 0x0c,
+0x00, 0xf2, 0x93, 0xdd, 0xc3, 0xc1, 0x46, 0x41, 0xfc, 0xe0, 0x04, 0x80, 0x09,
+0x00, 0x80, 0xe0, 0x09, 0x9e, 0x0b, 0xa3, 0x75, 0x82, 0x46, 0x41, 0x80, 0xe1,
+0x04, 0x80, 0xc6, 0x42, 0x8c, 0xe0, 0x04, 0xc2, 0x00, 0x40, 0x00, 0xf2, 0x07,
+0xcf, 0x06, 0x84, 0x06, 0x40, 0x84, 0xe0, 0x15, 0x00, 0x28, 0xe5, 0x1c, 0xc2,
+0x93, 0xdd, 0x0b, 0xa1, 0xc6, 0x00, 0xa0, 0xe1, 0x15, 0x00, 0x04, 0xf8, 0x05,
+0x84, 0x21, 0x8b, 0x2c, 0x84, 0x14, 0x80, 0x2c, 0x84, 0x14, 0x82, 0x2c, 0x84,
+0x15, 0x00, 0x10, 0xe0, 0x21, 0xa1, 0x21, 0x42, 0x10, 0xe0, 0x05, 0x00, 0x14,
+0xe0, 0x01, 0x88, 0x75, 0x83, 0x21, 0x85, 0x2c, 0x84, 0x14, 0x80, 0x06, 0x46,
+0x00, 0xe0, 0x2c, 0x84, 0x14, 0x82, 0x2c, 0x84, 0x14, 0xc0, 0x21, 0xa1, 0x21,
+0x42, 0x20, 0xe0, 0x14, 0xc2, 0x31, 0x42, 0x20, 0xe0, 0x15, 0x00, 0x10, 0xe0,
+0x21, 0x42, 0x20, 0xe0, 0x05, 0x00, 0x14, 0xe0, 0x01, 0x90, 0x06, 0x42, 0x00,
+0xe0, 0x16, 0x80, 0x93, 0xdd, 0xc3, 0xc1, 0x0c, 0x04, 0x7c, 0xfa, 0x4a, 0x40,
+0x80, 0xe0, 0xf0, 0x1e, 0x30, 0xec, 0xe5, 0x82, 0xa6, 0x40, 0x00, 0xe1, 0x1a,
+0x80, 0x2a, 0xc0, 0x3a, 0xc2, 0x13, 0x40, 0x10, 0xe0, 0x1a, 0x82, 0x23, 0x40,
+0x18, 0xe0, 0x33, 0x40, 0x1c, 0xe0, 0x13, 0x40, 0x14, 0xe0, 0xf8, 0x61, 0x68,
+0xef, 0xc6, 0x13, 0x00, 0xe1, 0x15, 0x12, 0x28, 0xf8, 0x0b, 0x02, 0x2c, 0xe0,
+0x1b, 0x02, 0x24, 0xe0, 0x8a, 0x00, 0xa5, 0x64, 0x03, 0xc0, 0x35, 0x82, 0x0a,
+0x4e, 0x9c, 0xe1, 0x1a, 0x03, 0x11, 0x6f, 0x02, 0xc0, 0xe8, 0x13, 0x01, 0x20,
+0x00, 0xc0, 0x1f, 0xa0, 0x5a, 0x42, 0x80, 0xe0, 0x0a, 0x4e, 0x9c, 0xe1, 0x68,
+0x13, 0x00, 0xa0, 0x09, 0x12, 0x78, 0xf8, 0xa1, 0x81, 0xf0, 0x02, 0x10, 0xe4,
+0x07, 0xc4, 0x0c, 0xfc, 0xf0, 0x00, 0x20, 0xe4, 0xa6, 0x91, 0xa8, 0x53, 0x74,
+0xef, 0x05, 0x12, 0x30, 0xf8, 0x25, 0x12, 0x28, 0xf8, 0x61, 0x87, 0x09, 0x00,
+0x48, 0xe0, 0x81, 0x85, 0x09, 0x86, 0x0b, 0xa7, 0x26, 0x0c, 0x00, 0xc0, 0x0b,
+0xa1, 0x0b, 0x04, 0x28, 0xe0, 0x16, 0x0c, 0x00, 0x80, 0x03, 0x52, 0x04, 0xf8,
+0x0b, 0x04, 0x20, 0xe0, 0x0c, 0xa6, 0x1b, 0x04, 0x2c, 0xe0, 0x3b, 0x04, 0x28,
+0xe0, 0x4b, 0x04, 0x20, 0xe0, 0x13, 0x86, 0x3b, 0x04, 0x24, 0xe0, 0x10, 0x0a,
+0x04, 0xec, 0x1a, 0xfc, 0x33, 0x88, 0x30, 0x06, 0x04, 0xec, 0x12, 0x4e, 0x94,
+0xf0, 0x32, 0x48, 0x84, 0xf0, 0x4c, 0xe4, 0x7c, 0xa4, 0xcb, 0x04, 0x28, 0xe0,
+0x14, 0x08, 0x84, 0xe1, 0xcd, 0xc9, 0xc2, 0x58, 0x90, 0x91, 0x42, 0x4e, 0x94,
+0x90, 0xc3, 0x52, 0x04, 0x98, 0x73, 0x52, 0x00, 0x80, 0x5b, 0x04, 0x20, 0xe0,
+0x5d, 0xc9, 0x52, 0x40, 0x90, 0x91, 0x42, 0x48, 0x8c, 0x90, 0x03, 0x52, 0x04,
+0x80, 0x43, 0x52, 0x08, 0x80, 0x3b, 0x04, 0x2c, 0xe0, 0x49, 0x04, 0xb8, 0xe0,
+0x33, 0x52, 0x1c, 0xf8, 0x2b, 0x04, 0x24, 0xe0, 0x4b, 0xab, 0x23, 0x52, 0x18,
+0xf8, 0x65, 0x8a, 0x4b, 0xa9, 0xe5, 0x90, 0x4b, 0xa7, 0x22, 0x44, 0x84, 0xd0,
+0x32, 0x46, 0x84, 0xd0, 0x33, 0x52, 0x1c, 0xd8, 0x23, 0x52, 0x18, 0xd8, 0x95,
+0x96, 0x20, 0x44, 0xf9, 0x73, 0xff, 0xc0, 0x27, 0xc3, 0x23, 0x82, 0x23, 0x52,
+0x18, 0xf8, 0x24, 0x02, 0x80, 0xfb, 0x04, 0x00, 0x80, 0xfb, 0x2b, 0x8c, 0x58,
+0x52, 0x74, 0xef, 0x1b, 0x12, 0x1c, 0xf8, 0x2a, 0xfc, 0x0c, 0xe4, 0x17, 0xc3,
+0x13, 0x84, 0x13, 0x52, 0x1c, 0xf8, 0x0b, 0x12, 0x04, 0xf8, 0x14, 0x02, 0x80,
+0xfb, 0x2b, 0x8c, 0x68, 0x51, 0x74, 0xef, 0xc5, 0x87, 0x20, 0x44, 0xe1, 0x73,
+0xff, 0xc0, 0x27, 0xc7, 0x23, 0x82, 0x23, 0x52, 0x18, 0xf8, 0x24, 0x02, 0x80,
+0xfb, 0x04, 0x00, 0x80, 0xfb, 0x2b, 0x8c, 0x78, 0x57, 0x74, 0xef, 0x1b, 0x12,
+0x1c, 0xf8, 0x2a, 0xfc, 0x0c, 0xe4, 0x17, 0xc7, 0x13, 0x84, 0x13, 0x52, 0x1c,
+0xf8, 0x0b, 0x12, 0x04, 0xf8, 0x14, 0x02, 0x80, 0xfb, 0x2b, 0x8c, 0x88, 0x56,
+0x74, 0xef, 0xe5, 0x83, 0x20, 0x44, 0xf1, 0x73, 0xff, 0xc0, 0x27, 0xc5, 0x23,
+0x82, 0x23, 0x52, 0x18, 0xf8, 0x24, 0x02, 0x80, 0xfb, 0x04, 0x00, 0x80, 0xfb,
+0x2b, 0x8c, 0x18, 0x52, 0x74, 0xef, 0x1b, 0x12, 0x1c, 0xf8, 0x2a, 0xfc, 0x0c,
+0xe4, 0x17, 0xc5, 0x13, 0x84, 0x13, 0x52, 0x1c, 0xf8, 0x0b, 0x12, 0x04, 0xf8,
+0x14, 0x02, 0x80, 0xfb, 0x2b, 0x8c, 0x28, 0x51, 0x74, 0xef, 0x7b, 0x80, 0x7c,
+0xa4, 0x08, 0x91, 0xa3, 0x52, 0x1c, 0xe0, 0xa3, 0x52, 0x24, 0xe0, 0x0b, 0xa1,
+0x83, 0x52, 0x1c, 0x80, 0x83, 0x52, 0x24, 0x80, 0x89, 0x12, 0x78, 0xf8, 0xf6,
+0x57, 0xfc, 0xef, 0x6b, 0x12, 0x1c, 0xf8, 0xab, 0x12, 0x18, 0xf8, 0xd6, 0x57,
+0xfc, 0x8f, 0x8b, 0xa3, 0xa0, 0x40, 0x00, 0x9c, 0xa5, 0x86, 0x64, 0x00, 0x80,
+0xfb, 0x1b, 0x90, 0xf8, 0x7d, 0xf8, 0xee, 0x6b, 0x80, 0xa4, 0x00, 0x80, 0xfb,
+0x1b, 0x90, 0x98, 0x7d, 0xf8, 0xee, 0x15, 0x12, 0x28, 0xf8, 0x19, 0x02, 0xb8,
+0xe0, 0x1b, 0xad, 0x95, 0x82, 0x1a, 0xa6, 0xa0, 0x44, 0xf9, 0x73, 0xff, 0xc0,
+0x27, 0xc3, 0x13, 0x94, 0x10, 0x02, 0x08, 0xec, 0x1c, 0xe4, 0x23, 0x52, 0x18,
+0xf8, 0x1b, 0x12, 0x04, 0xf8, 0x03, 0x96, 0x03, 0x52, 0x28, 0xe0, 0x1c, 0xe6,
+0x0a, 0xa6, 0x1a, 0xe4, 0x63, 0x96, 0x63, 0x52, 0x20, 0xe0, 0x73, 0x52, 0x10,
+0xe0, 0x03, 0x52, 0x14, 0xe0, 0x13, 0x52, 0x18, 0xe0, 0x98, 0x52, 0x74, 0xef,
+0x09, 0x12, 0x8c, 0xe0, 0x0b, 0xa1, 0x01, 0x81, 0x01, 0x52, 0x90, 0xe0, 0x65,
+0x82, 0x05, 0x12, 0x30, 0xf8, 0x09, 0x00, 0xa8, 0xe0, 0x0a, 0x00, 0x0c, 0xf8,
+0x16, 0x00, 0x00, 0xc0, 0x01, 0x52, 0x90, 0xc0, 0x46, 0x41, 0x84, 0xe0, 0x0a,
+0x80, 0x0a, 0x4e, 0x9c, 0xe9, 0x1a, 0x00, 0x08, 0xe0, 0x38, 0x01, 0x01, 0x20,
+0x00, 0xc0, 0x0b, 0x12, 0x1c, 0xe0, 0x1b, 0x12, 0x24, 0xe0, 0x2b, 0x12, 0x28,
+0xe0, 0x03, 0x52, 0x2c, 0xe0, 0x0b, 0x12, 0x20, 0xe0, 0x13, 0x52, 0x34, 0xe0,
+0x23, 0x52, 0x38, 0xe0, 0x03, 0x52, 0x30, 0xe0, 0x0c, 0x00, 0x00, 0xe2, 0xf1,
+0x98, 0x0c, 0x0c, 0x7c, 0xf2, 0x93, 0xdd, 0x13, 0xa9, 0x00, 0x00, 0xa8, 0xc1,
+0x40, 0x00, 0x68, 0x04, 0xa0, 0xe0, 0x40, 0x6c, 0x40, 0x00, 0xe8, 0x34, 0xc8,
+0xe0, 0xfc, 0x91, 0x40, 0x00, 0x68, 0x1f, 0xb8, 0xe0, 0x30, 0x16, 0x41, 0x00,
+0x28, 0x39, 0x74, 0xe0, 0xb0, 0x7e, 0x40, 0x00, 0xe8, 0x38, 0xc0, 0xe0, 0x30,
+0x04, 0x41, 0x00, 0x48, 0x1b, 0x80, 0xe0, 0x30, 0x2e, 0x40, 0x00, 0x88, 0x0c,
+0xec, 0xe0, 0x10, 0x9f, 0x40, 0x00, 0x88, 0x08, 0xb4, 0xe0, 0x10, 0x01, 0x41,
+0x00, 0x68, 0x01, 0x84, 0xe0, 0x54, 0xd6, 0x40, 0x00, 0xc8, 0x1a, 0x98, 0xe0,
+0xd0, 0xc8, 0x40, 0x00, 0x68, 0x08, 0xa0, 0xe0, 0x80, 0xdb, 0x40, 0x00, 0xe8,
+0x35, 0x94, 0xe0, 0x74, 0xff, 0x40, 0x00, 0xa8, 0x11, 0x80, 0xe0, 0xf8, 0x89,
+0x40, 0x00, 0x88, 0x16, 0xbc, 0xe0, 0x00, 0x90, 0x40, 0x00, 0x08, 0x35, 0xb8,
+0xe0, 0x7c, 0x73, 0x40, 0x00, 0x88, 0x1b, 0xc8, 0xe0, 0xf4, 0xff, 0x40, 0x00,
+0x68, 0x39, 0x80, 0xe0, 0xa4, 0xa4, 0x40, 0x00, 0xa8, 0x16, 0xb0, 0xe0, 0x50,
+0xc9, 0x40, 0x00, 0x28, 0x3a, 0x98, 0xe0, 0x00, 0xb9, 0x00, 0x00, 0xb6, 0x85,
+0x00, 0x00,
+};
 
-static const char * const vd55g1_test_pattern_menu[] = {
+static const char * const vd55g1_tp_menu[] = {
 	"Disabled",
 	"Dgrey",
 	"PN28",
@@ -175,34 +491,28 @@ static const s64 vd55g1_ev_bias_menu[] = {
 	  500,  1000,  1500,  2000,  2500, 3000,
 };
 
-static const char * const vd55g1_hdr_mode_menu[] = {
+static const char * const vd55g1_hdr_menu[] = {
+	"No HDR",
 	/*
-	 * This mode acquires 2 frames on the sensor, the first on is ditched
+	 * This mode acquires 2 frames on the sensor, the first one is ditched
 	 * out and only used for auto exposure data, the second one is output to
 	 * the host
 	 */
 	"Internal subtraction",
-	"No HDR",
 };
 
 static const char * const vd55g1_supply_name[] = {
-	"VCORE",
-	"VDDIO",
-	"VANA",
+	"vcore",
+	"vddio",
+	"vana",
 };
 
-static const s64 link_freq[] = {
-	/*
-	 * MIPI output freq is sensor datarate / 2, as it uses both rising edge
-	 * and falling edges to send data.
-	 * Sensor outputs at 1.2Ghz.
-	 */
-	600000000ULL
-};
+/* Will be filled on device tree parse */
+static u64 link_freq[1];
 
 enum vd55g1_hdr_mode {
-	VD55G1_HDR_SUB,
 	VD55G1_NO_HDR,
+	VD55G1_HDR_SUB,
 };
 
 enum vd55g1_bin_mode {
@@ -211,18 +521,16 @@ enum vd55g1_bin_mode {
 	VD55G1_BIN_MODE_DIGITAL_X4,
 };
 
-enum vd55g1_gpio_modes {
-	VD55G1_GPIO_MODE_DISABLED,
-	VD55G1_GPIO_MODE_STROBE,
-	VD55G1_GPIO_MODE_VSYNC_OUT_0,
-	VD55G1_GPIO_MODE_VTSLAVE,
+enum vd55g1_gpio_mode {
+	VD55G1_GPIO_MODE_FSYNC_OUT = 0x00,
+	VD55G1_GPIO_MODE_IN = 0x01,
+	VD55G1_GPIO_MODE_STROBE = 0x02,
+	VD55G1_GPIO_MODE_VTSLAVE = 0x0a,
 };
 
-struct vd55g1_mode_info {
+struct vd55g1_mode {
 	u32 width;
 	u32 height;
-	enum vd55g1_bin_mode bin_mode;
-	struct v4l2_rect crop;
 };
 
 struct vd55g1_fmt_desc {
@@ -231,7 +539,7 @@ struct vd55g1_fmt_desc {
 	u8 data_type;
 };
 
-static const struct vd55g1_fmt_desc vd55g1_supported_codes[] = {
+static const struct vd55g1_fmt_desc vd55g1_mbus_codes[] = {
 	{
 		.code = MEDIA_BUS_FMT_Y8_1X8,
 		.bpp = 8,
@@ -244,61 +552,35 @@ static const struct vd55g1_fmt_desc vd55g1_supported_codes[] = {
 	},
 };
 
-static const struct vd55g1_mode_info vd55g1_mode_data[] = {
+#if KERNEL_LACKS_CCI
+/* Big endian register addresses and 8b, 16b or 32b little endian values. */
+static const struct regmap_config vd55g1_regmap_config = {
+	.reg_bits = 16,
+	.val_bits = 8,
+	.reg_format_endian = REGMAP_ENDIAN_BIG,
+};
+#endif
+
+static const struct vd55g1_mode vd55g1_supported_modes[] = {
 	{
 		.width = VD55G1_WIDTH,
 		.height = VD55G1_HEIGHT,
-		.bin_mode = VD55G1_BIN_MODE_NORMAL,
-		.crop = {
-			.left = 0,
-			.top = 0,
-			.width = VD55G1_WIDTH,
-			.height = VD55G1_HEIGHT,
-		},
 	},
 	{
 		.width = 800,
 		.height = VD55G1_HEIGHT,
-		.bin_mode = VD55G1_BIN_MODE_NORMAL,
-		.crop = {
-			.left = 2,
-			.top = 0,
-			.width = 800,
-			.height = VD55G1_HEIGHT,
-		},
 	},
 	{
 		.width = 800,
 		.height = 600,
-		.bin_mode = VD55G1_BIN_MODE_NORMAL,
-		.crop = {
-			.left = 2,
-			.top = 52,
-			.width = 800,
-			.height = 600,
-		},
 	},
 	{
 		.width = 640,
 		.height = 480,
-		.bin_mode = VD55G1_BIN_MODE_NORMAL,
-		.crop = {
-			.left = 82,
-			.top = 112,
-			.width = 640,
-			.height = 480,
-		},
 	},
 	{
 		.width = 320,
 		.height = 240,
-		.bin_mode = VD55G1_BIN_MODE_DIGITAL_X2,
-		.crop = {
-			.left = 82,
-			.top = 112,
-			.width = 640,
-			.height = 480,
-		},
 	},
 };
 
@@ -310,311 +592,348 @@ enum vd55g1_expo_state {
 	VD55G1_EXP_BYPASS,
 };
 
-struct vd55g1_gpios {
-	u32 leds[VD55G1_NB_GPIOS];
-	u32 out_sync[VD55G1_NB_GPIOS];
-	u32 in_sync;
+struct vblank_limits {
+	u16 min;
+	u16 def;
+	u16 max;
 };
 
-struct vd55g1_dev {
+struct vd55g1 {
 	struct i2c_client *i2c_client;
 	struct v4l2_subdev sd;
 	struct media_pad pad;
 	struct regulator_bulk_data supplies[ARRAY_SIZE(vd55g1_supply_name)];
 	struct gpio_desc *reset_gpio;
 	struct clk *xclk;
-	u32 clk_freq;
+	struct regmap *regmap;
+	u32 xclk_freq;
 	u16 oif_ctrl;
-	int nb_of_lane;
+	enum vd55g1_gpio_mode gpios[VD55G1_NB_GPIOS];
+	bool ext_vt_sync;
+	unsigned long ext_leds_mask;
 	int data_rate_in_mbps;
-	int pclk;
-	u16 line_length;
-	/* Lock to protect all members below */
-	struct mutex lock;
+	u32 pixel_clock;
 	struct v4l2_ctrl_handler ctrl_handler;
 	struct v4l2_ctrl *pixel_rate_ctrl;
 	struct v4l2_ctrl *vblank_ctrl;
 	struct v4l2_ctrl *hblank_ctrl;
-	struct v4l2_ctrl *vflip_ctrl;
-	struct v4l2_ctrl *hflip_ctrl;
-	struct v4l2_ctrl *pattern_ctrl;
+	struct {
+		struct v4l2_ctrl *hflip_ctrl;
+		struct v4l2_ctrl *vflip_ctrl;
+	};
+	struct v4l2_ctrl *patgen_ctrl;
+	struct {
+		struct v4l2_ctrl *ae_ctrl;
+		struct v4l2_ctrl *expo_ctrl;
+		struct v4l2_ctrl *again_ctrl;
+		struct v4l2_ctrl *dgain_ctrl;
+	};
+	struct v4l2_ctrl *ae_lock_ctrl;
+	struct v4l2_ctrl *ae_bias_ctrl;
+	struct v4l2_ctrl *darkcal_ctrl;
 	struct v4l2_ctrl *slave_ctrl;
-	struct v4l2_ctrl *expo_ctrl;
+	struct v4l2_ctrl *led_ctrl;
 	struct v4l2_ctrl *hdr_ctrl;
 	bool streaming;
-	struct v4l2_mbus_framefmt fmt;
-	const struct vd55g1_mode_info *current_mode;
-	bool hflip;
-	bool vflip;
-	enum vd55g1_hdr_mode hdr;
-	u16 manual_expo;
-	enum vd55g1_expo_state expo_state;
-	u16 digital_gain;
-	u8 analog_gain;
-	u16 vblank;
-	u16 vblank_min;
-	u16 frame_length;
-	bool ae_frozen;
-	u32 pattern;
-	u16 darkcal_pedestal;
-	u16 exposure_target;
-	struct vd55g1_gpios gpios;
-	bool is_slave;
-	bool flash_en;
-	struct {
-		u16 expo;
-		u16 digital_gain;
-		u8 analog_gain;
-	} cold_start;
+#if KERNEL_LACKS_ACTIVE_STATES
+	/* Mutex for serialized access */
+	struct mutex lock;
+	struct v4l2_mbus_framefmt active_fmt;
+	struct v4l2_rect active_crop;
+#endif
 };
 
-static inline struct vd55g1_dev *to_vd55g1_dev(struct v4l2_subdev *sd)
+static inline struct vd55g1 *to_vd55g1(struct v4l2_subdev *sd)
 {
-	return container_of(sd, struct vd55g1_dev, sd);
+	return container_of_const(sd, struct vd55g1, sd);
 }
 
 static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
 {
-	return &container_of(ctrl->handler, struct vd55g1_dev,
+	return &container_of_const(ctrl->handler, struct vd55g1,
 		ctrl_handler)->sd;
 }
 
-static u8 get_bpp_by_code(__u32 code)
+static u8 get_bpp_by_code(struct vd55g1 *sensor, u32 code)
 {
+	struct i2c_client *client = sensor->i2c_client;
 	unsigned int i;
 
-	for (i = 0; i < ARRAY_SIZE(vd55g1_supported_codes); i++) {
-		if (vd55g1_supported_codes[i].code == code)
-			return vd55g1_supported_codes[i].bpp;
+	for (i = 0; i < ARRAY_SIZE(vd55g1_mbus_codes); i++) {
+		if (vd55g1_mbus_codes[i].code == code)
+			return vd55g1_mbus_codes[i].bpp;
 	}
 	/* Should never happen */
-	WARN(1, "Unsupported code %d. default to 8 bpp", code);
+	dev_warn(&client->dev, "Unsupported code %d. default to 8 bpp", code);
 	return 8;
 }
 
-static u8 get_data_type_by_code(__u32 code)
+static u8 get_data_type_by_code(struct vd55g1 *sensor, u32 code)
 {
+	struct i2c_client *client = sensor->i2c_client;
 	unsigned int i;
 
-	for (i = 0; i < ARRAY_SIZE(vd55g1_supported_codes); i++) {
-		if (vd55g1_supported_codes[i].code == code)
-			return vd55g1_supported_codes[i].data_type;
+	for (i = 0; i < ARRAY_SIZE(vd55g1_mbus_codes); i++) {
+		if (vd55g1_mbus_codes[i].code == code)
+			return vd55g1_mbus_codes[i].data_type;
 	}
 	/* Should never happen */
-	WARN(1, "Unsupported code %d. default to MIPI_CSI2_DT_RAW8 data type",
-	     code);
+	dev_warn(&client->dev, "Unsupported code %d. default to MIPI_CSI2_DT_RAW8 data type",
+		 code);
 	return MIPI_CSI2_DT_RAW8;
 }
 
-static s32 get_pixel_rate(struct vd55g1_dev *sensor)
+static s32 get_pixel_rate(struct vd55g1 *sensor)
 {
-	return div64_u64((u64)sensor->data_rate_in_mbps * sensor->nb_of_lane,
-			 get_bpp_by_code(sensor->fmt.code));
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
+#elif KERNEL_LACKS_NEW_STATES_API
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_state_get_format(state, 0);
+#endif
+
+	return div64_u64((u64)sensor->data_rate_in_mbps,
+			 get_bpp_by_code(sensor, format->code));
 }
 
-static int get_chunk_size(struct vd55g1_dev *sensor)
+static s32 get_min_line_length(struct vd55g1 *sensor)
 {
-	int max_write_len = VD55G1_WRITE_MULTIPLE_CHUNK_MAX;
-	struct i2c_adapter *adapter = sensor->i2c_client->adapter;
+	u32 mipi_req_line_time;
+	u32 mipi_req_line_length;
+	u32 min_line_length;
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+	const struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
+#elif KERNEL_LACKS_NEW_STATES_API
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_state_get_crop(state, 0);
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_state_get_format(state, 0);
+#endif
 
-	if (adapter->quirks && adapter->quirks->max_write_len)
-		max_write_len = adapter->quirks->max_write_len - 2;
+	/* MIPI required time */
+	mipi_req_line_time = (crop->width *
+			      get_bpp_by_code(sensor, format->code) +
+			      VD55G1_MIPI_MARGIN) /
+			      (sensor->data_rate_in_mbps / MEGA);
+	mipi_req_line_length = mipi_req_line_time * sensor->pixel_clock /
+			       HZ_PER_MHZ;
 
-	max_write_len = min(max_write_len, VD55G1_WRITE_MULTIPLE_CHUNK_MAX);
+	/* Absolute time required for ADCs to convert pixels */
+	min_line_length = VD55G1_LINE_LENGTH_MIN;
+	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB)
+		min_line_length = VD55G1_LINE_LENGTH_SUB_MIN;
 
-	return max(max_write_len, 1);
+	/* Respect both constraint */
+	return max(min_line_length, mipi_req_line_length);
 }
 
-static int vd55g1_read_multiple(struct vd55g1_dev *sensor, u32 reg,
-				unsigned int len)
+static unsigned int get_hblank_min(struct vd55g1 *sensor)
+{
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+#elif KERNEL_LACKS_NEW_STATES_API
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+#endif
+
+	return get_min_line_length(sensor) - crop->width;
+}
+
+static struct vblank_limits get_vblank_limits(struct vd55g1 *sensor)
+{
+	struct vblank_limits limits;
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+#elif KERNEL_LACKS_NEW_STATES_API
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+#endif
+
+	limits.min = VD55G1_VBLANK_MIN;
+	limits.def = VD55G1_FRAME_LENGTH_DEF - crop->height;
+	limits.max = VD55G1_VBLANK_MAX - crop->height;
+
+	return limits;
+}
+
+#if KERNEL_LACKS_CCI
+static int vd55g1_read(struct vd55g1 *sensor, u32 reg, u64 *val, int *err)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	struct i2c_msg msg[2];
-	u8 buf[2];
-	u8 val[sizeof(u32)] = {0};
-	int ret;
-
-	if (len > sizeof(u32))
-		return -EINVAL;
-	buf[0] = reg >> 8;
-	buf[1] = reg & 0xff;
-
-	msg[0].addr = client->addr;
-	msg[0].flags = client->flags;
-	msg[0].buf = buf;
-	msg[0].len = sizeof(buf);
-
-	msg[1].addr = client->addr;
-	msg[1].flags = client->flags | I2C_M_RD;
-	msg[1].buf = val;
-	msg[1].len = len;
-
-	ret = i2c_transfer(client->adapter, msg, 2);
-	if (ret < 0) {
-		dev_dbg(&client->dev, "%s: %x i2c_transfer, reg: %x => %d\n",
-			__func__, client->addr, reg, ret);
-		return ret;
-	}
-
-	return get_unaligned_le32(val);
-}
-
-static inline int vd55g1_read_reg(struct vd55g1_dev *sensor, u32 reg)
-{
-	return vd55g1_read_multiple(sensor, reg & VD55G1_REG_ADDR_MASK,
-				     (reg >> VD55G1_REG_SIZE_SHIFT) & 7);
-}
-
-static int vd55g1_write_multiple(struct vd55g1_dev *sensor, u32 reg,
-				 const u8 *data, unsigned int len, int *err)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	struct i2c_msg msg;
-	u8 buf[VD55G1_WRITE_MULTIPLE_CHUNK_MAX + 2];
-	unsigned int i;
+	unsigned int len = (reg >> CCI_REG_WIDTH_SHIFT) & 7;
+	u8 buf[4];
 	int ret;
 
 	if (err && *err)
 		return *err;
 
-	if (len > VD55G1_WRITE_MULTIPLE_CHUNK_MAX || len == 0)
-		return -EINVAL;
-	buf[0] = reg >> 8;
-	buf[1] = reg & 0xff;
-	for (i = 0; i < len; i++)
-		buf[i + 2] = data[i];
+	reg = reg & CCI_REG_ADDR_MASK;
 
-	msg.addr = client->addr;
-	msg.flags = client->flags;
-	msg.buf = buf;
-	msg.len = len + 2;
-
-	ret = i2c_transfer(client->adapter, &msg, 1);
-	if (ret < 0) {
-		dev_dbg(&client->dev, "%s: i2c_transfer, reg: %x => %d\n",
+	ret = regmap_bulk_read(sensor->regmap, reg, buf, len);
+	if (ret) {
+		dev_err(&client->dev, "%s: Error reading reg 0x%04x: %d\n",
 			__func__, reg, ret);
-		if (err)
-			*err = ret;
-		return ret;
+		goto out;
 	}
 
-	return 0;
+	switch (len) {
+	case 1:
+		*val = buf[0];
+		break;
+	case 2:
+		*val = get_unaligned_le16(buf);
+		break;
+	case 4:
+		*val = get_unaligned_le32(buf);
+		break;
+	default:
+		dev_err(&client->dev,
+			"%s: Error invalid reg-width %u for reg 0x%04x\n",
+			__func__, len, reg);
+		ret = -EINVAL;
+		break;
+	}
+
+out:
+	if (ret && err)
+		*err = ret;
+
+	return ret;
 }
 
-static int vd55g1_write_array(struct vd55g1_dev *sensor, u32 reg,
-			      unsigned int nb, const u8 *array)
+static int vd55g1_write(struct vd55g1 *sensor, u32 reg, u64 val, int *err)
 {
-	const unsigned int chunk_size = get_chunk_size(sensor);
+	struct i2c_client *client = sensor->i2c_client;
+	unsigned int len = (reg >> CCI_REG_WIDTH_SHIFT) & 7;
+	u8 buf[4];
 	int ret;
-	unsigned int sz;
 
-	while (nb) {
-		sz = min(nb, chunk_size);
-		ret = vd55g1_write_multiple(sensor, reg, array, sz, NULL);
+	if (err && *err)
+		return *err;
+
+	reg = reg & CCI_REG_ADDR_MASK;
+	switch (len) {
+	case 1:
+		buf[0] = val;
+		break;
+	case 2:
+		put_unaligned_le16(val, buf);
+		break;
+	case 4:
+		put_unaligned_le32(val, buf);
+		break;
+	default:
+		dev_err(&client->dev,
+			"%s: Error invalid reg-width %u for reg 0x%04x\n",
+			__func__, len, reg);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	ret = regmap_bulk_write(sensor->regmap, reg, buf, len);
+	if (ret)
+		dev_err(&client->dev, "%s: Error writing reg 0x%04x: %d\n",
+			__func__, reg, ret);
+
+out:
+	if (ret && err)
+		*err = ret;
+
+	return ret;
+}
+#else
+#define vd55g1_read(sensor, reg, val, err) \
+	cci_read((sensor)->regmap, reg, val, err)
+
+#define vd55g1_write(sensor, reg, val, err) \
+	cci_write((sensor)->regmap, reg, (u64)val, err)
+#endif
+
+static int vd55g1_write_array(struct vd55g1 *sensor, u32 reg, unsigned int len,
+			      const u8 *array, int *err)
+{
+	unsigned int chunk_sz = 1024;
+	unsigned int sz;
+	int ret = 0;
+
+	if (err && *err)
+		return *err;
+
+	/*
+	 * This loop isn't necessary but in certains conditions (platforms, cpu
+	 * load, etc.) it has been observed that the bulk write could timeout.
+	 */
+	while (len) {
+		sz = min(len, chunk_sz);
+		ret = regmap_bulk_write(sensor->regmap, reg, array, sz);
 		if (ret < 0)
-			return ret;
-		nb -= sz;
+			goto out;
+		len -= sz;
 		reg += sz;
 		array += sz;
 	}
 
-	return 0;
+out:
+	if (ret && err)
+		*err = ret;
+
+	return ret;
 }
 
-static inline int vd55g1_write_reg(struct vd55g1_dev *sensor, u32 reg, u32 val,
-				   int *err)
+static int vd55g1_poll_reg(struct vd55g1 *sensor, u32 reg, u8 poll_val,
+			   int *err)
 {
-	return vd55g1_write_multiple(sensor, reg & VD55G1_REG_ADDR_MASK,
-				     (u8 *)&val,
-				     (reg >> VD55G1_REG_SIZE_SHIFT) & 7, err);
-}
-
-static int vd55g1_poll_reg(struct vd55g1_dev *sensor, u32 reg, u8 poll_val,
-			   unsigned int timeout_ms)
-{
-	const unsigned int loop_delay_ms = 10;
-	int ret;
-#if KERNEL_VERSION(5, 7, 0) > LINUX_VERSION_CODE
-	int loop_nb = timeout_ms / loop_delay_ms;
-
-	while (--loop_nb) {
-		ret = vd55g1_read_reg(sensor, reg);
-		if (ret < 0)
-			return ret;
-		if (ret == poll_val)
-			return 0;
-		msleep(loop_delay_ms);
-	}
-	return -ETIMEDOUT;
-#else
-	return read_poll_timeout(vd55g1_read_reg, ret,
-				 ((ret < 0) || (ret == poll_val)),
-				 loop_delay_ms * 1000, timeout_ms * 1000,
-				 false, sensor, reg);
-#endif
-}
-
-static int vd55g1_wait_state(struct vd55g1_dev *sensor, int state,
-			     unsigned int timeout_ms)
-{
-	return vd55g1_poll_reg(sensor, VD55G1_REG_SYSTEM_FSM, state,
-			       timeout_ms);
-}
-
-static int vd55g1_update_gpio_mode(struct vd55g1_dev *sensor, u32 mode,
-				   int gpio)
-{
-	u8 index2val[] = {0x01, 0x02, 0x06, 0x0a};
+	unsigned int val = 0;
 	int ret;
 
-	if (sensor->hdr == VD55G1_HDR_SUB && mode == VD55G1_GPIO_MODE_STROBE) {
-		/* Make its context 1 counterpart strobe too */
-		ret = vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(1) + gpio,
-				       index2val[mode], NULL);
-		if (ret)
-			return ret;
-	}
+	if (err && *err)
+		return *err;
 
-	return vd55g1_write_reg(sensor, VD55G1_REG_GPIO_0_CTRL(0) + gpio,
-				index2val[mode], NULL);
+	ret = regmap_read_poll_timeout(sensor->regmap, CCI_REG_ADDR(reg), val,
+				       (val == poll_val), 2000,
+				       500 * USEC_PER_MSEC);
+
+	if (ret && err)
+		*err = ret;
+
+	return ret;
 }
 
-static int vd55g1_set_gpios_array(struct vd55g1_dev *sensor, u32 *array,
-				  int size, enum vd55g1_gpio_modes mode)
+static int vd55g1_wait_state(struct vd55g1 *sensor, int state, int *err)
 {
-	unsigned int i;
-	int ret;
-
-	for (i = 0; i < size;  i++) {
-		if (array[i] == ~0)
-			break;
-		ret = vd55g1_update_gpio_mode(sensor, mode, array[i]);
-		if (ret)
-			return -EINVAL;
-	}
-
-	return 0;
+	return vd55g1_poll_reg(sensor, VD55G1_REG_SYSTEM_FSM, state, err);
 }
 
-static int vd55g1_apply_exposure_auto(struct vd55g1_dev *sensor)
-{
-	enum vd55g1_expo_state exp = sensor->expo_state;
-	int ret;
-
-	if (sensor->hdr == VD55G1_HDR_SUB) {
-		ret = vd55g1_write_reg(sensor, VD55G1_REG_EXP_MODE(1),
-				       VD55G1_EXP_BYPASS, NULL);
-		if (ret)
-			return ret;
-	}
-
-	if (sensor->ae_frozen && sensor->expo_state == VD55G1_EXP_AUTO)
-		exp = VD55G1_EXP_FREEZE;
-
-	return vd55g1_write_reg(sensor, VD55G1_REG_EXP_MODE(0), exp, NULL);
-}
-
-static int vd55g1_get_regulators(struct vd55g1_dev *sensor)
+static int vd55g1_get_regulators(struct vd55g1 *sensor)
 {
 	int i;
 
@@ -626,19 +945,66 @@ static int vd55g1_get_regulators(struct vd55g1_dev *sensor)
 				       sensor->supplies);
 }
 
-static int vd55g1_apply_patgen(struct vd55g1_dev *sensor)
+static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	/* Double data rate */
+	u64 mipi_freq = link_freq[0] * 2;
+	u32 sys_clk, mipi_div, pixel_div;
+	int ret = 0;
+
+	if (sensor->xclk_freq < 6 * HZ_PER_MHZ ||
+	    sensor->xclk_freq > 27 * HZ_PER_MHZ) {
+		dev_err(&client->dev,
+			"Only 6Mhz-27Mhz clock range supported. Provided %lu MHz\n",
+			sensor->xclk_freq / HZ_PER_MHZ);
+		return -EINVAL;
+	}
+
+	if (mipi_freq < 250 * HZ_PER_MHZ ||
+	    mipi_freq > 1200 * HZ_PER_MHZ) {
+		dev_err(&client->dev,
+			"Only 250Mhz-1200Mhz link frequency range supported. Provided %llu MHz\n",
+			mipi_freq / HZ_PER_MHZ);
+		return -EINVAL;
+	}
+
+	if (mipi_freq <= 300 * HZ_PER_MHZ)
+		mipi_div = 4;
+	else if (mipi_freq <= 600 * HZ_PER_MHZ)
+		mipi_div = 2;
+	else
+		mipi_div = 1;
+
+	sys_clk = mipi_freq * mipi_div;
+
+	if (sys_clk <= 780 * HZ_PER_MHZ)
+		pixel_div = 5;
+	else if (sys_clk <= 900 * HZ_PER_MHZ)
+		pixel_div = 6;
+	else
+		pixel_div = 8;
+
+	sensor->pixel_clock = sys_clk / pixel_div;
+	/* Frequency to data rate is 1:1 ratio for MIPI */
+	sensor->data_rate_in_mbps = mipi_freq;
+
+	return ret;
+}
+
+static int vd55g1_update_patgen(struct vd55g1 *sensor, u32 patgen_index)
 {
 	static const u8 index2val[] = {
 		0x0, 0x22, 0x28
 	};
-	u32 pattern = index2val[sensor->pattern];
+	u32 pattern = index2val[patgen_index];
 	u32 reg = pattern << VD55G1_PATGEN_TYPE_SHIFT;
 	u8 darkcal = VD55G1_DARKCAL_AUTO;
 	u8 duster = VD55G1_DUSTER_RING_ENABLE | VD55G1_DUSTER_DYN_ENABLE |
 		    VD55G1_DUSTER_ENABLE;
 	int ret = 0;
 
-	if (sensor->pattern != 0) {
+	if (pattern != 0) {
 		reg |= VD55G1_PATGEN_ENABLE;
 		/*
 		 * Take care of dark calibaration and duster to not mess up the
@@ -648,84 +1014,67 @@ static int vd55g1_apply_patgen(struct vd55g1_dev *sensor)
 		duster = VD55G1_DUSTER_DISABLE;
 	}
 
-	vd55g1_write_reg(sensor, VD55G1_REG_DARKCAL_CTRL, darkcal, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_DUSTER_CTRL, duster, &ret);
-	if (ret)
-		return ret;
-
-	return vd55g1_write_reg(sensor, VD55G1_REG_PATGEN_CTRL, reg, NULL);
-}
-
-static int vd55g1_apply_flash(struct vd55g1_dev *sensor)
-{
-	struct vd55g1_gpios *gpios = &sensor->gpios;
-
-	enum vd55g1_gpio_modes mode = sensor->flash_en ?
-				      VD55G1_GPIO_MODE_STROBE :
-				      VD55G1_GPIO_MODE_DISABLED;
-
-	return vd55g1_set_gpios_array(sensor, gpios->leds,
-				      ARRAY_SIZE(gpios->leds), mode);
-}
-
-static int vd55g1_apply_darkcal_pedestal(struct vd55g1_dev *sensor)
-{
-	int ret = 0;
-
-	vd55g1_write_reg(sensor, VD55G1_REG_DARKCAL_PEDESTAL(0),
-			 sensor->darkcal_pedestal, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_DARKCAL_PEDESTAL(1),
-			 sensor->darkcal_pedestal, &ret);
+	vd55g1_write(sensor, VD55G1_REG_DARKCAL_CTRL, darkcal, &ret);
+	vd55g1_write(sensor, VD55G1_REG_DUSTER_CTRL, duster, &ret);
+	vd55g1_write(sensor, VD55G1_REG_PATGEN_CTRL, reg, &ret);
 
 	return ret;
 }
 
-static int vd55g1_update_exposure_auto(struct vd55g1_dev *sensor, u32 index)
+static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
 {
-	int ret;
+	enum vd55g1_expo_state expo_state = is_auto ? VD55G1_EXP_AUTO :
+						      VD55G1_EXP_MANUAL;
+	int ret = 0;
 
-	switch (index) {
-	case V4L2_EXPOSURE_AUTO:
-		sensor->expo_state = VD55G1_EXP_AUTO;
-		break;
-	case V4L2_EXPOSURE_MANUAL:
-		sensor->expo_state = VD55G1_EXP_MANUAL;
-		break;
-	default:
-		/* Should never happen */
-		ret = -EINVAL;
+	if (sensor->ae_ctrl->is_new)
+		vd55g1_write(sensor, VD55G1_REG_EXP_MODE(0), expo_state, &ret);
+
+	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB &&
+	    sensor->hdr_ctrl->is_new) {
+		vd55g1_write(sensor, VD55G1_REG_EXP_MODE(1), VD55G1_EXP_BYPASS,
+			     &ret);
+		if (ret)
+			return ret;
 	}
 
-	if (sensor->streaming)
-		return vd55g1_apply_exposure_auto(sensor);
-	return 0;
+	if (!is_auto && sensor->expo_ctrl->is_new)
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_COARSE_EXPOSURE,
+			     sensor->expo_ctrl->val, &ret);
+
+	if (!is_auto && sensor->again_ctrl->is_new)
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
+			     sensor->again_ctrl->val, &ret);
+
+	if (!is_auto && sensor->dgain_ctrl->is_new) {
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
+			     sensor->dgain_ctrl->val, &ret);
+	}
+
+	return ret;
 }
 
-static int vd55g1_lock_exposure(struct vd55g1_dev *sensor,
-				struct v4l2_ctrl *ctrl)
+static int vd55g1_lock_exposure(struct vd55g1 *sensor, u32 lock_val)
 {
-	/* Only exposure lock is supported */
-	bool ae_lock = ctrl->val & V4L2_LOCK_EXPOSURE;
+	bool ae_lock = lock_val & V4L2_LOCK_EXPOSURE;
+	enum vd55g1_expo_state expo_state = ae_lock ? VD55G1_EXP_FREEZE :
+						      VD55G1_EXP_AUTO;
+	int ret = 0;
+
+	if (sensor->ae_ctrl->val == V4L2_EXPOSURE_AUTO)
+		vd55g1_write(sensor, VD55G1_REG_EXP_MODE(0), expo_state, &ret);
+
+	return ret;
+}
+
+static int vd55g1_get_temp_stream_enable(struct vd55g1 *sensor, int *temp)
+{
+	u64 temperature;
 	int ret;
 
-	sensor->ae_frozen = ae_lock;
-
-	/* Cap control value to reflect the hardware state */
-	ctrl->val = ae_lock;
-
-	ret = vd55g1_apply_exposure_auto(sensor);
+	ret = vd55g1_read(sensor, VD55G1_REG_TEMPERATURE, &temperature, NULL);
 	if (ret)
 		return ret;
-	return 0;
-}
-
-static int vd55g1_get_temp_stream_enable(struct vd55g1_dev *sensor, int *temp)
-{
-	int temperature;
-
-	temperature = vd55g1_read_reg(sensor, VD55G1_REG_TEMPERATURE);
-	if (temperature < 0)
-		return temperature;
 
 	/* temperature is signed 10 bits value. extend sign */
 	temperature = (temperature << 6) >> 6;
@@ -734,48 +1083,23 @@ static int vd55g1_get_temp_stream_enable(struct vd55g1_dev *sensor, int *temp)
 	return 0;
 }
 
-static int vd55g1_apply_framelength(struct vd55g1_dev *sensor)
-{
-	int ret = 0;
-
-	if (sensor->hdr == VD55G1_HDR_SUB) {
-		vd55g1_write_reg(sensor, VD55G1_REG_FRAME_LENGTH(1),
-				 sensor->frame_length, &ret);
-		if (ret)
-			return ret;
-	}
-
-	return vd55g1_write_reg(sensor, VD55G1_REG_FRAME_LENGTH(0),
-				sensor->frame_length, NULL);
-}
-
-static int vd55g1_update_vblank(struct vd55g1_dev *sensor, u16 vblank)
-{
-	sensor->frame_length = sensor->current_mode->crop.height +
-			       sensor->vblank;
-
-	if (sensor->streaming)
-		return vd55g1_apply_framelength(sensor);
-	return 0;
-}
-
-static int vd55g1_get_temp_stream_disable(struct vd55g1_dev *sensor, int *temp)
+static int vd55g1_get_temp_stream_disable(struct vd55g1 *sensor, int *temp)
 {
 	int ret;
 
 	/* request temperature read */
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_STBY,
-			       VD55G1_STBY_THSENS_READ, NULL);
+	ret = vd55g1_write(sensor, VD55G1_REG_STBY, VD55G1_STBY_THSENS_READ,
+			   NULL);
 	if (ret)
 		return ret;
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, VD55G1_TIMEOUT_MS);
+	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, NULL);
 	if (ret)
 		return ret;
 
 	return vd55g1_get_temp_stream_enable(sensor, temp);
 }
 
-static int vd55g1_get_temp(struct vd55g1_dev *sensor, int *temp)
+static int vd55g1_get_temp(struct vd55g1 *sensor, int *temp)
 {
 	*temp = 0;
 	if (sensor->streaming)
@@ -784,48 +1108,42 @@ static int vd55g1_get_temp(struct vd55g1_dev *sensor, int *temp)
 		return vd55g1_get_temp_stream_disable(sensor, temp);
 }
 
-static int vd55g1_update_analog_gain(struct vd55g1_dev *sensor, u32 target)
+static int vd55g1_read_expo_cluster(struct vd55g1 *sensor)
 {
-	sensor->analog_gain = target;
+	u64 exposure = 0;
+	u64 again = 0;
+	u64 dgain = 0;
+	int ret = 0;
 
-	if (sensor->streaming)
-		return vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
-					target, NULL);
-	return 0;
-}
+	vd55g1_read(sensor, VD55G1_REG_APPLIED_COARSE_EXPOSURE, &exposure,
+		    &ret);
+	vd55g1_read(sensor, VD55G1_REG_APPLIED_ANALOG_GAIN, &again, &ret);
+	vd55g1_read(sensor, VD55G1_REG_APPLIED_DIGITAL_GAIN, &dgain, &ret);
+	if (ret)
+		return ret;
 
-static int vd55g1_update_digital_gain(struct vd55g1_dev *sensor, u32 target)
-{
-	sensor->digital_gain = target;
-
-	if (sensor->streaming)
-		return vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
-					target, NULL);
-	return 0;
-}
-
-static int vd55g1_update_exposure(struct vd55g1_dev *sensor, int expo_ms)
-{
-	sensor->manual_expo = expo_ms;
-	if (sensor->streaming)
-		return vd55g1_write_reg(sensor,
-					VD55G1_REG_MANUAL_COARSE_EXPOSURE,
-					sensor->manual_expo, NULL);
+	sensor->expo_ctrl->cur.val = exposure;
+	sensor->again_ctrl->cur.val = again;
+	sensor->dgain_ctrl->cur.val = dgain;
 
 	return 0;
 }
 
-static int vd55g1_update_darkcal_pedestal(struct vd55g1_dev *sensor,
-					  int pedestal)
+static int vd55g1_update_frame_length(struct vd55g1 *sensor,
+				      unsigned int frame_length)
 {
-	sensor->darkcal_pedestal = pedestal;
-	if (sensor->streaming)
-		return vd55g1_apply_darkcal_pedestal(sensor);
+	int ret = 0;
 
-	return 0;
+	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB) {
+		vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(1), frame_length,
+			     &ret);
+	}
+	vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(0), frame_length, &ret);
+
+	return ret;
 }
 
-static int vd55g1_update_exposure_target(struct vd55g1_dev *sensor, int index)
+static int vd55g1_update_exposure_target(struct vd55g1 *sensor, int index)
 {
 	/*
 	 * Find auto exposure target with: default target exposure * 2^EV
@@ -834,39 +1152,52 @@ static int vd55g1_update_exposure_target(struct vd55g1_dev *sensor, int index)
 	static const unsigned int index2exposure_target[] = {
 		3, 5, 7, 10, 14, 19, 27, 38, 54, 76, 108, 153, 216,
 	};
+	int exposure_target = index2exposure_target[index];
 
-	sensor->exposure_target = index2exposure_target[index];
-	if (sensor->streaming)
-		return vd55g1_write_reg(sensor, VD55G1_REG_AE_TARGET_PERCENTAGE,
-					sensor->exposure_target, NULL);
-
-	return 0;
+	return vd55g1_write(sensor, VD55G1_REG_AE_TARGET_PERCENTAGE,
+			    exposure_target, NULL);
 }
 
-static int vd55g1_update_flash(struct vd55g1_dev *sensor, int flash_en)
+static int vd55g1_apply_cold_start(struct vd55g1 *sensor)
 {
-	sensor->flash_en = flash_en;
-	if (sensor->streaming)
-		return vd55g1_apply_flash(sensor);
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+#elif KERNEL_LACKS_NEW_STATES_API
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+#endif
 
-	return 0;
+	/*
+	 * Cold start register is a single register expressed as exposure time
+	 * in us. This differ from status registers being a combination of
+	 * exposure, digital gain, and analog gain, requiring the following
+	 * format conversion.
+	 */
+	unsigned int line_length = crop->width + sensor->hblank_ctrl->val;
+	unsigned int line_time_us = DIV_ROUND_UP(line_length * MEGA,
+						 sensor->pixel_clock);
+	u8 d_gain = DIV_ROUND_CLOSEST(sensor->dgain_ctrl->val, 1 << 8);
+	u8 a_gain = DIV_ROUND_CLOSEST(32, (32 - sensor->again_ctrl->val));
+	unsigned int expo_us = sensor->expo_ctrl->val * d_gain * a_gain *
+			       line_time_us;
+	int ret = 0;
+
+	vd55g1_write(sensor, VD55G1_REG_AE_FORCE_COLDSTART, 1, &ret);
+	vd55g1_write(sensor, VD55G1_REG_AE_COLDSTART_EXP_TIME, expo_us, &ret);
+
+	return ret;
 }
 
-static int vd55g1_apply_reset(struct vd55g1_dev *sensor)
-{
-	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
-	usleep_range(5000, 10000);
-	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
-	usleep_range(5000, 10000);
-	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
-	usleep_range(5000, 10000);
-	return vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_READY_TO_BOOT,
-				 VD55G1_TIMEOUT_MS);
-}
-
-static void vd55g1_fill_framefmt(struct vd55g1_dev *sensor,
-				 const struct vd55g1_mode_info *mode,
-				 struct v4l2_mbus_framefmt *fmt, u32 code)
+static void vd55g1_update_img_pad_format(struct vd55g1 *sensor,
+					 const struct vd55g1_mode *mode,
+					 u32 code,
+					 struct v4l2_mbus_framefmt *fmt)
 {
 	fmt->code = code;
 	fmt->width = mode->width;
@@ -878,498 +1209,305 @@ static void vd55g1_fill_framefmt(struct vd55g1_dev *sensor,
 	fmt->xfer_func = V4L2_XFER_FUNC_DEFAULT;
 }
 
-static int vd55g1_try_fmt_internal(struct v4l2_subdev *sd,
-				   struct v4l2_mbus_framefmt *fmt,
-				   const struct vd55g1_mode_info **new_mode)
-{
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
-	const struct vd55g1_mode_info *mode = vd55g1_mode_data;
-	unsigned int index;
-
-	for (index = 0; index < ARRAY_SIZE(vd55g1_supported_codes); index++) {
-		if (vd55g1_supported_codes[index].code == fmt->code)
-			break;
-	}
-	if (index == ARRAY_SIZE(vd55g1_supported_codes))
-		index = 0;
-
-	mode = v4l2_find_nearest_size(vd55g1_mode_data,
-				      ARRAY_SIZE(vd55g1_mode_data), width,
-				      height, fmt->width, fmt->height);
-	if (new_mode)
-		*new_mode = mode;
-
-	vd55g1_fill_framefmt(sensor, mode, fmt,
-			     vd55g1_supported_codes[index].code);
-
-	return 0;
-}
-
-static int vd55g1_apply_cold_start(struct vd55g1_dev *sensor)
-{
-	/*
-	 * Cold start register is a single register expressed as exposure time
-	 * in us. This differ from status registers being a combination of
-	 * exposure, digital gain, and analog gain, requiring the following
-	 * format conversion.
-	 */
-	unsigned int line_time_us = DIV_ROUND_UP(sensor->line_length * MEGA,
-						 sensor->pclk);
-	u8 d_gain = DIV_ROUND_CLOSEST(sensor->cold_start.digital_gain, 1 << 8);
-	u8 a_gain = DIV_ROUND_CLOSEST(32,
-				      (32 - sensor->cold_start.analog_gain));
-	unsigned int expo_us = sensor->cold_start.expo * d_gain * a_gain *
-			       line_time_us;
-	int ret = 0;
-
-	vd55g1_write_reg(sensor, VD55G1_REG_AE_FORCE_COLDSTART, 1, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_AE_COLDSTART_EXP_TIME, expo_us,
-			 &ret);
-
-	return ret;
-}
-
-static int vd55g1_apply_hdr_mode(struct vd55g1_dev *sensor)
+static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 {
 	int ret = 0;
 
-	switch (sensor->hdr) {
+	switch (sensor->hdr_ctrl->val) {
 	case VD55G1_NO_HDR:
-		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_USE_CASES, 0,
-				 &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_NEXT_CTX, 0x0, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_CTX_REPEAT_COUNT(0), 1,
-				 &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_VT_MODE(0),
-				 VD55G1_VT_MODE_NORMAL, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
-				 VD55G1_MASK_FRAME_CTRL_OUTPUT, &ret);
+		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_MAX_COARSE,
+			     VD55G1_EXPOSURE_MAX_COARSE_DEF, &ret);
+		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_USE_CASES, 0, &ret);
+		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x0, &ret);
+
+		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX0, 0, &ret);
+
+		vd55g1_write(sensor, VD55G1_REG_VT_MODE(0),
+			     VD55G1_VT_MODE_NORMAL, &ret);
+		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
+			     VD55G1_MASK_FRAME_CTRL_OUTPUT, &ret);
 		break;
 	case VD55G1_HDR_SUB:
-		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_USE_CASES,
-				 VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_NEXT_CTX, 0x1, &ret);
+		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_MAX_COARSE,
+			     VD55G1_EXPOSURE_MAX_COARSE_SUB, &ret);
+		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_USE_CASES,
+			     VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT, &ret);
+		vd55g1_write(sensor, VD55G1_REG_NEXT_CTX, 0x0001, &ret);
 
-		vd55g1_write_reg(sensor, VD55G1_REG_CTX_REPEAT_COUNT(0), 1,
-				 &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_VT_MODE(0),
-				 VD55G1_VT_MODE_NORMAL, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
-				 VD55G1_MASK_FRAME_CTRL_MASK, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_INSTANCE(0), 0,
-				 &ret);
+		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX0, 1, &ret);
+		vd55g1_write(sensor, VD55G1_REG_CTX_REPEAT_COUNT_CTX1, 1, &ret);
 
-		vd55g1_write_reg(sensor, VD55G1_REG_CTX_REPEAT_COUNT(1), 1,
-				 &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_VT_MODE(1),
-				 VD55G1_VT_MODE_SUBTRACTION, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_MASK_FRAME_CTRL(1),
-				 VD55G1_MASK_FRAME_CTRL_OUTPUT, &ret);
-		vd55g1_write_reg(sensor, VD55G1_REG_EXPOSURE_INSTANCE(1), 1,
-				 &ret);
+		vd55g1_write(sensor, VD55G1_REG_VT_MODE(0),
+			     VD55G1_VT_MODE_NORMAL, &ret);
+		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(0),
+			     VD55G1_MASK_FRAME_CTRL_MASK, &ret);
+		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_INSTANCE(0), 0, &ret);
+		vd55g1_write(sensor, VD55G1_REG_VT_MODE(1),
+			     VD55G1_VT_MODE_SUBTRACTION, &ret);
+		vd55g1_write(sensor, VD55G1_REG_MASK_FRAME_CTRL(1),
+			     VD55G1_MASK_FRAME_CTRL_OUTPUT, &ret);
+		vd55g1_write(sensor, VD55G1_REG_EXPOSURE_INSTANCE(1), 1, &ret);
 		break;
 	default:
-		/* Should never happen */
-		WARN(1, "Unsupported hdr mode %d", sensor->hdr);
 		ret = -EINVAL;
 	}
 
 	return ret;
 }
 
-static int vd55g1_apply_settings(struct vd55g1_dev *sensor)
+static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 {
-	int ret;
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+	const struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
+#elif KERNEL_LACKS_NEW_STATES_API
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_state_get_crop(state, 0);
+	const struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_state_get_format(state, 0);
+#endif
+	enum vd55g1_bin_mode binning;
+	int ret = 0;
 
-	ret = vd55g1_apply_framelength(sensor);
-	if (ret)
+	vd55g1_write(sensor, VD55G1_REG_FORMAT_CTRL,
+		     get_bpp_by_code(sensor, format->code), &ret);
+	vd55g1_write(sensor, VD55G1_REG_OIF_IMG_CTRL,
+		     get_data_type_by_code(sensor, format->code), &ret);
+
+	switch (crop->width / format->width) {
+	case 1:
+	default:
+		binning = VD55G1_BIN_MODE_NORMAL;
+		break;
+	case 2:
+		binning = VD55G1_BIN_MODE_DIGITAL_X2;
+		break;
+	}
+	vd55g1_write(sensor, VD55G1_REG_READOUT_CTRL, binning, &ret);
+
+	vd55g1_write(sensor, VD55G1_REG_X_START(0), crop->left, &ret);
+	vd55g1_write(sensor, VD55G1_REG_X_WIDTH(0), crop->width, &ret);
+	vd55g1_write(sensor, VD55G1_REG_Y_START(0), crop->top, &ret);
+	vd55g1_write(sensor, VD55G1_REG_Y_HEIGHT(0), crop->height, &ret);
+
+	vd55g1_write(sensor, VD55G1_REG_X_START(1), crop->left, &ret);
+	vd55g1_write(sensor, VD55G1_REG_X_WIDTH(1), crop->width, &ret);
+	vd55g1_write(sensor, VD55G1_REG_Y_START(1), crop->top, &ret);
+	vd55g1_write(sensor, VD55G1_REG_Y_HEIGHT(1), crop->height, &ret);
+
+	return ret;
+}
+
+static int vd55g1_update_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
+{
+	unsigned long io;
+	u32 gpio_val;
+	int ret = 0;
+
+	for_each_set_bit(io, &gpio_mask, VD55G1_NB_GPIOS) {
+		gpio_val = sensor->gpios[io];
+
+		if (gpio_val == VD55G1_GPIO_MODE_VTSLAVE &&
+		    !sensor->slave_ctrl->val)
+			gpio_val = VD55G1_GPIO_MODE_IN;
+
+		if (gpio_val == VD55G1_GPIO_MODE_STROBE &&
+		    sensor->led_ctrl->val == V4L2_FLASH_LED_MODE_NONE) {
+			gpio_val = VD55G1_GPIO_MODE_IN;
+			if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB) {
+				/* Make its context 1 counterpart strobe too */
+				vd55g1_write(sensor,
+					     VD55G1_REG_GPIO_0_CTRL(1) + io,
+					     gpio_val, &ret);
+			}
+		}
+
+		ret = vd55g1_write(sensor, VD55G1_REG_GPIO_0_CTRL(0) + io,
+				   gpio_val, &ret);
+	}
+
+	return ret;
+}
+
+static int vd55g1_ro_ctrls_setup(struct vd55g1 *sensor)
+{
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+
+#elif KERNEL_LACKS_NEW_STATES_API
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+
+#endif
+	return vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH,
+			    crop->width + sensor->hblank_ctrl->val, NULL);
+}
+
+static void vd55g1_lock_ctrls(struct vd55g1 *sensor, bool enable)
+{
+	/* These settings cannot change during stream */
+	v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
+	v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
+	v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
+	v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
+	v4l2_ctrl_grab(sensor->hblank_ctrl, enable);
+	if (sensor->ext_vt_sync)
+		v4l2_ctrl_grab(sensor->slave_ctrl, enable);
+}
+
+#if KERNEL_LACKS_STREAMS_API
+static int vd55g1_enable_streams(struct v4l2_subdev *sd)
+#else
+static int vd55g1_enable_streams(struct v4l2_subdev *sd,
+				 struct v4l2_subdev_state *state, u32 pad,
+				 u64 streams_mask)
+#endif
+{
+	struct vd55g1 *sensor = to_vd55g1(sd);
+	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
+	int ret = 0;
+
+#if (KERNEL_VERSION(5, 9, 0) > LINUX_VERSION_CODE)
+	ret = __pm_runtime_resume(&client->dev, RPM_GET_PUT);
+	if (ret < 0) {
+		pm_runtime_put_noidle(&client->dev);
+		return ret;
+	}
+#else
+	ret = pm_runtime_resume_and_get(&client->dev);
+#endif
+	if (ret < 0)
 		return ret;
 
-	ret = vd55g1_apply_exposure_auto(sensor);
-	if (ret)
-		return ret;
+	vd55g1_write(sensor, VD55G1_REG_EXT_CLOCK, sensor->xclk_freq, &ret);
 
-	ret = vd55g1_apply_hdr_mode(sensor);
+	/* configure output */
+	vd55g1_write(sensor, VD55G1_REG_MIPI_DATA_RATE,
+		     sensor->data_rate_in_mbps, &ret);
+	vd55g1_write(sensor, VD55G1_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
+	vd55g1_write(sensor, VD55G1_REG_ISL_ENABLE, 0, &ret);
 	if (ret)
-		return ret;
+		goto err_rpm_put;
 
-	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_COARSE_EXPOSURE,
-			 sensor->manual_expo, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
-			 sensor->analog_gain, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
-			 sensor->digital_gain, &ret);
+	ret = vd55g1_set_framefmt(sensor);
 	if (ret)
-		return ret;
+		goto err_rpm_put;
+
+	/* Setup default GPIO values; could be overridden by V4L2 ctrl setup */
+	ret = vd55g1_update_gpios(sensor, GENMASK(VD55G1_NB_GPIOS - 1, 0));
+	if (ret)
+		goto err_rpm_put;
 
 	ret = vd55g1_apply_cold_start(sensor);
 	if (ret)
-		return ret;
+		goto err_rpm_put;
 
-	vd55g1_write_reg(sensor, VD55G1_REG_ORIENTATION,
-			 sensor->hflip | (sensor->vflip << 1), &ret);
-
-	ret = vd55g1_apply_darkcal_pedestal(sensor);
+	/* Apply settings from V4L2 ctrls */
+	ret = __v4l2_ctrl_handler_setup(&sensor->ctrl_handler);
 	if (ret)
-		return ret;
+		goto err_rpm_put;
 
-	ret = vd55g1_apply_patgen(sensor);
+	/* Also apply settings from read-only V4L2 ctrls */
+	ret = vd55g1_ro_ctrls_setup(sensor);
 	if (ret)
-		return ret;
+		goto err_rpm_put;
 
-	return 0;
-}
+	/* Start streaming */
+	vd55g1_write(sensor, VD55G1_REG_STBY, VD55G1_STBY_START_STREAM, &ret);
+	vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, &ret);
+	vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_STREAMING, &ret);
+	if (ret)
+		goto err_rpm_put;
 
-static int vd55g1_apply_frame_format(struct vd55g1_dev *sensor)
-{
-	const struct v4l2_rect *crop = &sensor->current_mode->crop;
-	int ret = 0;
-
-	vd55g1_write_reg(sensor, VD55G1_REG_READOUT_CTRL,
-			 sensor->current_mode->bin_mode, &ret);
-
-	vd55g1_write_reg(sensor, VD55G1_REG_X_START(0), crop->left, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_X_WIDTH(0), crop->width, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_Y_START(0), crop->top, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_Y_HEIGHT(0), crop->height, &ret);
-
-	vd55g1_write_reg(sensor, VD55G1_REG_X_START(1), crop->left, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_X_WIDTH(1), crop->width, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_Y_START(1), crop->top, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_Y_HEIGHT(1), crop->height, &ret);
+	vd55g1_lock_ctrls(sensor, true);
+	sensor->streaming = true;
 
 	return ret;
-}
-
-static int vd55g1_set_gpios(struct vd55g1_dev *sensor)
-{
-	struct vd55g1_gpios *gpios = &sensor->gpios;
-	int ret;
-	unsigned int i;
-
-	/* GPIOs in input (disabled) by default */
-	for (i = 0; i < VD55G1_NB_GPIOS; i++) {
-		ret = vd55g1_update_gpio_mode(sensor,
-					      VD55G1_GPIO_MODE_DISABLED, i);
-		if (ret)
-			return ret;
-	}
-
-	ret = vd55g1_apply_flash(sensor);
-	if (ret)
-		return ret;
-
-	ret = vd55g1_set_gpios_array(sensor, gpios->out_sync,
-				     ARRAY_SIZE(gpios->out_sync),
-				     VD55G1_GPIO_MODE_VSYNC_OUT_0);
-	if (ret)
-		return ret;
-
-	if (!sensor->is_slave)
-		return 0;
-
-	ret = vd55g1_update_gpio_mode(sensor, VD55G1_GPIO_MODE_VTSLAVE,
-				      gpios->in_sync);
-	if (ret)
-		return -EINVAL;
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_VT_CTRL, VD55G1_VT_SLAVE_GPIO,
-			       NULL);
-
-	return ret;
-}
-
-static int vd55g1_stream_enable(struct vd55g1_dev *sensor)
-{
-	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
-	int ret;
-
-	ret = pm_runtime_get_sync(&client->dev);
-	if (ret < 0) {
-		pm_runtime_put_autosuspend(&client->dev);
-		return ret;
-	}
-
-	/* pm_runtime_get_sync() can return 1 as a valid return code */
-	ret = 0;
-
-	ret = vd55g1_set_gpios(sensor);
-	if (ret)
-		goto err_rpm_put;
-
-	vd55g1_write_reg(sensor, VD55G1_REG_FORMAT_CTRL,
-			 get_bpp_by_code(sensor->fmt.code), &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_OIF_IMG_CTRL,
-			 get_data_type_by_code(sensor->fmt.code), &ret);
-	if (ret)
-		goto err_rpm_put;
-
-	ret = vd55g1_apply_frame_format(sensor);
-	if (ret)
-		goto err_rpm_put;
-
-	ret = vd55g1_apply_settings(sensor);
-	if (ret)
-		goto err_rpm_put;
-
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_STBY,
-			       VD55G1_STBY_START_STREAM, NULL);
-	if (ret)
-		goto err_rpm_put;
-
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, VD55G1_TIMEOUT_MS);
-	if (ret)
-		goto err_rpm_put;
-
-	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_STREAMING,
-				VD55G1_TIMEOUT_MS);
-	if (ret)
-		goto err_rpm_put;
-
-	return 0;
 
 err_rpm_put:
 	pm_runtime_put(&client->dev);
 	return ret;
 }
 
-static void vd55g1_save_exposure(struct vd55g1_dev *sensor)
+#if KERNEL_LACKS_STREAMS_API
+static int vd55g1_disable_streams(struct v4l2_subdev *sd)
+#else
+static int vd55g1_disable_streams(struct v4l2_subdev *sd,
+				  struct v4l2_subdev_state *state, u32 pad,
+				  u64 streams_mask)
+#endif
 {
-	int ret;
-
-	ret = vd55g1_read_reg(sensor, VD55G1_REG_APPLIED_COARSE_EXPOSURE);
-	sensor->cold_start.expo = ret < 0 ? 0 : ret;
-	ret = vd55g1_read_reg(sensor, VD55G1_REG_APPLIED_DIGITAL_GAIN);
-	sensor->cold_start.digital_gain = ret < 0 ? 0 : ret;
-	ret = vd55g1_read_reg(sensor, VD55G1_REG_APPLIED_ANALOG_GAIN);
-	sensor->cold_start.analog_gain = ret < 0 ? 0 : ret;
-}
-
-static int vd55g1_stream_disable(struct vd55g1_dev *sensor)
-{
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
-	int ret;
+	int ret = 0;
 
-	/* Keep exposure values for next cold start boot */
-	vd55g1_save_exposure(sensor);
+	/* Retrieve Expo cluster to enable coldstart of AE */
+	ret = vd55g1_read_expo_cluster(sensor);
 
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_STREAMING,
-			       VD55G1_STREAMING_STOP_STREAM, NULL);
+	vd55g1_write(sensor, VD55G1_REG_STREAMING, VD55G1_STREAMING_STOP_STREAM,
+		     &ret);
+	vd55g1_poll_reg(sensor, VD55G1_REG_STREAMING, 0, &ret);
+	vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY, &ret);
+
 	if (ret)
-		goto err_str_dis;
+		dev_warn(&client->dev, "Can't disable stream");
 
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_STREAMING, 0, 2000);
-	if (ret)
-		goto err_str_dis;
+	vd55g1_lock_ctrls(sensor, false);
+	sensor->streaming = false;
 
-	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY,
-				VD55G1_TIMEOUT_MS);
-
-err_str_dis:
-	if (ret)
-		WARN(1, "Can't disable stream");
-	pm_runtime_put(&client->dev);
+	pm_runtime_mark_last_busy(&client->dev);
+	__pm_runtime_put_autosuspend(&client->dev);
 
 	return ret;
 }
 
-static int vd55g1_tx_from_ep(struct vd55g1_dev *sensor,
-			     struct fwnode_handle *handle)
+static int vd55g1_patch(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	struct v4l2_fwnode_endpoint *ep;
-	u32 log2phy[VD55G1_NB_POLARITIES] = {~0, ~0, ~0};
-	u32 phy2log[VD55G1_NB_POLARITIES] = {~0, ~0, ~0};
-	int polarities[VD55G1_NB_POLARITIES] = {0, 0, 0};
-	int l_nb;
-	int p, l;
-	int i;
+	u64 patch;
+	int ret = 0;
 
-#if KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE
-	ep = v4l2_fwnode_endpoint_alloc_parse(handle);
-#else
-	struct v4l2_fwnode_endpoint ep_node = { .bus_type =
-		V4L2_MBUS_CSI2_DPHY
-	};
-	int ret;
-
-	ep = &ep_node;
-	ret = v4l2_fwnode_endpoint_alloc_parse(handle, ep);
-	if (ret)
-		return -EINVAL;
-#endif
-
-	l_nb = ep->bus.mipi_csi2.num_data_lanes;
-	if (l_nb != 1 && l_nb != 2) {
-		dev_err(&client->dev, "invalid data lane number %d\n", l_nb);
-		goto error_ep;
-	}
-
-	/* build  log2phy, phy2log and polarities from ep info */
-	log2phy[0] = ep->bus.mipi_csi2.clock_lane;
-	phy2log[log2phy[0]] = 0;
-	for (l = 1; l < l_nb + 1; l++) {
-		log2phy[l] = ep->bus.mipi_csi2.data_lanes[l - 1];
-		phy2log[log2phy[l]] = l;
-	}
-	/*
-	 * then fill remaining slots for every physical slot have something
-	 * valid for hardware stuff.
-	 */
-	for (p = 0; p < VD55G1_NB_POLARITIES; p++) {
-		if (phy2log[p] != ~0)
-			continue;
-		phy2log[p] = l;
-		log2phy[l] = p;
-		l++;
-	}
-	for (l = 0; l < l_nb + 1; l++)
-		polarities[l] = ep->bus.mipi_csi2.lane_polarities[l];
-
-	if (log2phy[0] != 0) {
-		dev_err(&client->dev, "clk lane must be map to physical lane 0\n");
-		goto error_ep;
-	}
-	sensor->oif_ctrl = l_nb |
-			   (polarities[0] << 3) |
-			   ((phy2log[1] - 1) << 4) |
-			   (polarities[1] << 6) |
-			   ((phy2log[2] - 1) << 7) |
-			   (polarities[2] << 9);
-	sensor->nb_of_lane = l_nb;
-
-	dev_dbg(&client->dev, "tx uses %d lanes", l_nb);
-	for (i = 0; i < VD55G1_NB_POLARITIES; i++) {
-		dev_dbg(&client->dev, "log2phy[%d] = %d", i, log2phy[i]);
-		dev_dbg(&client->dev, "phy2log[%d] = %d", i, phy2log[i]);
-		dev_dbg(&client->dev, "polarity[%d] = %d", i, polarities[i]);
-	}
-	dev_dbg(&client->dev, "oif_ctrl = 0x%04x\n", sensor->oif_ctrl);
-
-	v4l2_fwnode_endpoint_free(ep);
-
-	return 0;
-
-error_ep:
-	v4l2_fwnode_endpoint_free(ep);
-
-	return -EINVAL;
-}
-
-static int vd55g1_patch(struct vd55g1_dev *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	int patch, ret;
-
-	ret = vd55g1_write_array(sensor, VD55G1_REG_FWPATCH_START_ADDR,
-				 sizeof(patch_array), patch_array);
-	if (ret)
+	vd55g1_write_array(sensor, VD55G1_REG_FWPATCH_START_ADDR,
+			   sizeof(patch_array), patch_array, &ret);
+	vd55g1_write(sensor, VD55G1_REG_BOOT, VD55G1_BOOT_PATCH_SETUP, &ret);
+	vd55g1_poll_reg(sensor, VD55G1_REG_BOOT, 0, &ret);
+	if (ret) {
+		dev_err(&client->dev, "Failed to apply patch");
 		return ret;
+	}
 
-	ret = vd55g1_write_reg(sensor, VD55G1_REG_BOOT,
-			       VD55G1_BOOT_PATCH_SETUP, NULL);
-	if (ret)
-		return ret;
-
-	ret = vd55g1_poll_reg(sensor, VD55G1_REG_BOOT, 0, VD55G1_TIMEOUT_MS);
-	if (ret)
-		return ret;
-
-	patch = vd55g1_read_reg(sensor, VD55G1_REG_FWPATCH_REVISION);
-	if (patch < 0)
-		return patch;
-
+	vd55g1_read(sensor, VD55G1_REG_FWPATCH_REVISION, &patch, &ret);
 	if (patch != (VD55G1_FWPATCH_REVISION_MAJOR << 8) +
 	    VD55G1_FWPATCH_REVISION_MINOR) {
-		dev_err(&client->dev, "bad patch version expected %d.%d got %d.%d",
+		dev_err(&client->dev, "Bad patch version expected %d.%d got %d.%d",
 			VD55G1_FWPATCH_REVISION_MAJOR,
 			VD55G1_FWPATCH_REVISION_MINOR,
-			patch >> 8, patch & 0xff);
+			(u8)(patch >> 8), (u8)(patch & 0xff));
 		return -ENODEV;
 	}
-	dev_dbg(&client->dev, "patch %d.%d applied", patch >> 8, patch & 0xff);
+	dev_dbg(&client->dev, "patch %d.%d applied",
+		(u8)(patch >> 8), (u8)(patch & 0xff));
 
 	return 0;
 }
 
-static int vd55g1_configure(struct vd55g1_dev *sensor)
-{
-	/* Double data rate */
-	u32 mipi_bps = link_freq[0] * 2;
-	u32 req_line_length = (sensor->current_mode->crop.width *
-			       get_bpp_by_code(sensor->fmt.code) +
-			       VD55G1_MIPI_MARGIN) / VD55G1_PCLK_DIVISOR;
-	u32 min_line_length;
-	int ret = 0;
-
-	/* Frequency to data rate is 1:1 ratio for MIPI */
-	sensor->data_rate_in_mbps = mipi_bps;
-	/* Video timing ISP path (pixel clock)  requires 804/5 mhz = 160 mhz */
-	sensor->pclk = mipi_bps / VD55G1_PCLK_DIVISOR;
-
-	min_line_length = VD55G1_MIN_LINE_LENGTH;
-	if (sensor->hdr == VD55G1_HDR_SUB)
-		min_line_length = VD55G1_MIN_LINE_LENGTH_SUB;
-	sensor->line_length = max(min_line_length, req_line_length);
-
-	vd55g1_write_reg(sensor, VD55G1_REG_LINE_LENGTH, sensor->line_length,
-			 &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_EXT_CLOCK, sensor->clk_freq, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
-	vd55g1_write_reg(sensor, VD55G1_REG_MIPI_DATA_RATE, mipi_bps, &ret);
-
-	return ret;
-}
-
-static inline bool vd55g1_can_be_slave(struct vd55g1_dev *sensor)
-{
-	return sensor->gpios.in_sync != ~0;
-}
-
-static void vd55g1_update_hblank_ctrl(struct vd55g1_dev *sensor)
-{
-	int height = sensor->current_mode->crop.height;
-
-	if (sensor->hdr == VD55G1_HDR_SUB)
-		__v4l2_ctrl_modify_range(sensor->vblank_ctrl,
-					 sensor->vblank_min * 2 + height,
-					 0xffff - height * 2, 1,
-					 sensor->vblank);
-	else
-		__v4l2_ctrl_modify_range(sensor->vblank_ctrl,
-					 sensor->vblank_min,
-					 0xffff - height, 1,
-					 sensor->vblank);
-	__v4l2_ctrl_s_ctrl(sensor->vblank_ctrl, sensor->vblank);
-}
-
-static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
-{
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
-	int ret = 0;
-
-	mutex_lock(&sensor->lock);
-
-	ret = enable ? vd55g1_stream_enable(sensor) :
-		       vd55g1_stream_disable(sensor);
-	if (!ret)
-		sensor->streaming = enable;
-
-	mutex_unlock(&sensor->lock);
-
-	if (!ret) {
-		/* These settings cannot change during streaming */
-		v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
-		v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
-		v4l2_ctrl_grab(sensor->pattern_ctrl, enable);
-		v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
-		if (vd55g1_can_be_slave(sensor))
-			v4l2_ctrl_grab(sensor->slave_ctrl, enable);
-	}
-
-	return ret;
-}
-
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_SUBDEV_STATES
 static int vd55g1_get_selection(struct v4l2_subdev *sd,
 				struct v4l2_subdev_pad_config *cfg,
 				struct v4l2_subdev_selection *sel)
@@ -1379,11 +1517,19 @@ static int vd55g1_get_selection(struct v4l2_subdev *sd,
 				struct v4l2_subdev_selection *sel)
 #endif
 {
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+#if KERNEL_LACKS_ACTIVE_STATES
+	struct vd55g1 *sensor = to_vd55g1(sd);
+	const struct v4l2_rect *crop = &sensor->active_crop;
+#elif KERNEL_LACKS_NEW_STATES_API
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(sd, sd_state, 0);
+#else
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(sd_state, 0);
+#endif
 
 	switch (sel->target) {
 	case V4L2_SEL_TGT_CROP:
-		sel->r = sensor->current_mode->crop;
+		sel->r = *crop;
 		return 0;
 	case V4L2_SEL_TGT_NATIVE_SIZE:
 	case V4L2_SEL_TGT_CROP_DEFAULT:
@@ -1398,7 +1544,7 @@ static int vd55g1_get_selection(struct v4l2_subdev *sd,
 	return -EINVAL;
 }
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_SUBDEV_STATES
 static int vd55g1_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_pad_config *cfg,
 				 struct v4l2_subdev_mbus_code_enum *code)
@@ -1408,131 +1554,214 @@ static int vd55g1_enum_mbus_code(struct v4l2_subdev *sd,
 				 struct v4l2_subdev_mbus_code_enum *code)
 #endif
 {
-	if (code->index >= ARRAY_SIZE(vd55g1_supported_codes))
+	if (code->index >= ARRAY_SIZE(vd55g1_mbus_codes))
 		return -EINVAL;
 
-	code->code = vd55g1_supported_codes[code->index].code;
+	code->code = vd55g1_mbus_codes[code->index].code;
 
 	return 0;
 }
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-static int vd55g1_get_fmt(struct v4l2_subdev *sd,
-			  struct v4l2_subdev_pad_config *cfg,
-			  struct v4l2_subdev_format *format)
+#if KERNEL_LACKS_ACTIVE_STATES
+#if KERNEL_LACKS_SUBDEV_STATES
+static int vd55g1_get_pad_fmt(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_pad_config *cfg,
+			      struct v4l2_subdev_format *sd_fmt)
 #else
-static int vd55g1_get_fmt(struct v4l2_subdev *sd,
-			  struct v4l2_subdev_state *sd_state,
-			  struct v4l2_subdev_format *format)
+static int vd55g1_get_pad_fmt(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_state *sd_state,
+			      struct v4l2_subdev_format *sd_fmt)
 #endif
 {
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
-	struct v4l2_mbus_framefmt *fmt;
+	struct vd55g1 *sensor = to_vd55g1(sd);
+	struct v4l2_mbus_framefmt *pad_fmt;
 
 	mutex_lock(&sensor->lock);
 
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY)
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-		fmt = v4l2_subdev_get_try_format(&sensor->sd, cfg,
-						 format->pad);
+	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY)
+#if KERNEL_LACKS_SUBDEV_STATES
+		pad_fmt = v4l2_subdev_get_try_format(&sensor->sd, cfg,
+						     sd_fmt->pad);
 #else
-		fmt = v4l2_subdev_get_try_format(&sensor->sd, sd_state,
-						 format->pad);
+		pad_fmt = v4l2_subdev_get_try_format(&sensor->sd, sd_state,
+						     sd_fmt->pad);
 #endif
 	else
-		fmt = &sensor->fmt;
+		pad_fmt = &sensor->active_fmt;
 
-	format->format = *fmt;
+	sd_fmt->format = *pad_fmt;
 
 	mutex_unlock(&sensor->lock);
 
 	return 0;
 }
-
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-static int vd55g1_set_fmt(struct v4l2_subdev *sd,
-			  struct v4l2_subdev_pad_config *cfg,
-			  struct v4l2_subdev_format *format)
-#else
-static int vd55g1_set_fmt(struct v4l2_subdev *sd,
-			  struct v4l2_subdev_state *sd_state,
-			  struct v4l2_subdev_format *format)
 #endif
+
+static int vd55g1_new_format_change_controls(struct vd55g1 *sensor)
 {
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
-	const struct vd55g1_mode_info *new_mode;
-	struct v4l2_mbus_framefmt *fmt;
-	unsigned int expo_max, hblank;
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+#elif KERNEL_LACKS_NEW_STATES_API
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+#endif
+	struct vblank_limits vblank;
+	unsigned int hblank;
+	unsigned int frame_length = 0;
+	unsigned int expo_max;
 	int ret;
 
-	mutex_lock(&sensor->lock);
-
-	ret = vd55g1_try_fmt_internal(sd, &format->format, &new_mode);
+	/* Reset vblank and frame length to default */
+	vblank = get_vblank_limits(sensor);
+	ret = __v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank.min,
+				       vblank.max, 1, vblank.def);
 	if (ret)
-		goto out;
+		return ret;
 
-	if (format->which == V4L2_SUBDEV_FORMAT_TRY) {
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-		fmt = v4l2_subdev_get_try_format(sd, cfg, 0);
-#else
-		fmt = v4l2_subdev_get_try_format(sd, sd_state, 0);
-#endif
-		*fmt = format->format;
-	} else if (sensor->current_mode != new_mode ||
-		   sensor->fmt.code != format->format.code) {
-		fmt = &sensor->fmt;
-		*fmt = format->format;
+	/* Max exposure changes with vblank */
+	frame_length = crop->height + sensor->vblank_ctrl->val;
+	expo_max = frame_length - VD55G1_EXPO_MAX_TERM;
+	ret = __v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
+				       VD55G1_EXPO_DEF);
+	if (ret)
+		return ret;
 
-		sensor->current_mode = new_mode;
+	/* Update pixel rate to reflect new bpp */
+	ret = __v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
+				       get_pixel_rate(sensor));
+	if (ret)
+		return ret;
 
-		/* Reset vblank and framelength to default */
-		ret = vd55g1_update_vblank(sensor,
-					   VD55G1_FRAME_LENGTH_DEF -
-					   new_mode->crop.height);
-
-		/* Update controls to reflect new mode */
-		__v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
-					 get_pixel_rate(sensor));
-		vd55g1_update_hblank_ctrl(sensor);
-		/* Max exposure changes with vblank */
-		expo_max = sensor->frame_length - VD55G1_EXPO_MAX_TERM;
-		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
-					 VD55G1_EXPO_DEF);
-		/* Update hblank according to new width */
-		hblank = sensor->line_length - sensor->current_mode->width;
-		__v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank, hblank, 1,
-					 hblank);
-		ret = __v4l2_ctrl_s_ctrl(sensor->hblank_ctrl, hblank);
-	}
-
-out:
-	mutex_unlock(&sensor->lock);
+	/* Update hblank according to new width */
+	hblank = get_hblank_min(sensor);
+	ret = __v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank, hblank, 1,
+				       hblank);
 
 	return ret;
 }
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-static int vd55g1_init_cfg(struct v4l2_subdev *sd,
-			   struct v4l2_subdev_pad_config *cfg)
+#if KERNEL_LACKS_SUBDEV_STATES
+static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_pad_config *cfg,
+			      struct v4l2_subdev_format *sd_fmt)
 #else
-static int vd55g1_init_cfg(struct v4l2_subdev *sd,
-			   struct v4l2_subdev_state *sd_state)
+static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
+			      struct v4l2_subdev_state *sd_state,
+			      struct v4l2_subdev_format *sd_fmt)
 #endif
 {
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
-	struct v4l2_subdev_format fmt = { 0 };
+	struct vd55g1 *sensor = to_vd55g1(sd);
+	const struct vd55g1_mode *new_mode;
+	struct v4l2_mbus_framefmt *format;
+	struct v4l2_rect pad_crop;
+	unsigned int binning;
+#if KERNEL_LACKS_ACTIVE_STATES
+	int ret = 0;
 
-	vd55g1_fill_framefmt(sensor, sensor->current_mode, &fmt.format,
-			     VD55G1_MEDIA_BUS_FMT_DEF);
+	mutex_lock(&sensor->lock);
+#endif
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
-	return vd55g1_set_fmt(sd, cfg, &fmt);
+	new_mode = v4l2_find_nearest_size(vd55g1_supported_modes,
+					  ARRAY_SIZE(vd55g1_supported_modes),
+					  width, height, sd_fmt->format.width,
+					  sd_fmt->format.height);
+
+	vd55g1_update_img_pad_format(sensor, new_mode, sd_fmt->format.code,
+				     &sd_fmt->format);
+
+	/*
+	 * Use binning to maximize the crop rectangle size, and centre it in the
+	 * sensor.
+	 */
+	binning = min(VD55G1_WIDTH / sd_fmt->format.width,
+		      VD55G1_HEIGHT / sd_fmt->format.height);
+	binning = min(binning, 2U);
+	pad_crop.width = sd_fmt->format.width * binning;
+	pad_crop.height = sd_fmt->format.height * binning;
+	pad_crop.left = (VD55G1_WIDTH - pad_crop.width) / 2;
+	pad_crop.top = (VD55G1_HEIGHT - pad_crop.height) / 2;
+
+#if KERNEL_LACKS_ACTIVE_STATES
+	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_TRY) {
+#if KERNEL_LACKS_SUBDEV_STATES
+		format = v4l2_subdev_get_try_format(sd, cfg, sd_fmt->pad);
 #else
-	return vd55g1_set_fmt(sd, sd_state, &fmt);
+		format = v4l2_subdev_get_try_format(sd, sd_state, sd_fmt->pad);
+#endif
+		*format = sd_fmt->format;
+	} else {
+		sensor->active_fmt = sd_fmt->format;
+		sensor->active_crop = pad_crop;
+		return vd55g1_new_format_change_controls(sensor);
+	}
+
+	mutex_unlock(&sensor->lock);
+
+	return ret;
+#else
+#if KERNEL_LACKS_NEW_STATES_API
+	format = v4l2_subdev_get_pad_format(sd, sd_state, sd_fmt->pad);
+#else
+	format = v4l2_subdev_state_get_format(sd_state, sd_fmt->pad);
+#endif
+
+	*format = sd_fmt->format;
+
+#if KERNEL_LACKS_NEW_STATES_API
+	*v4l2_subdev_get_pad_crop(sd, sd_state, sd_fmt->pad) = pad_crop;
+#else
+	*v4l2_subdev_state_get_crop(sd_state, sd_fmt->pad) = pad_crop;
+#endif
+	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
+		return vd55g1_new_format_change_controls(sensor);
+
+	return 0;
 #endif
 }
 
-#if KERNEL_VERSION(5, 14, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_SUBDEV_STATES
+static int vd55g1_init_state(struct v4l2_subdev *sd,
+			     struct v4l2_subdev_pad_config *cfg)
+#else
+static int vd55g1_init_state(struct v4l2_subdev *sd,
+			     struct v4l2_subdev_state *sd_state)
+#endif
+{
+	unsigned int def_mode = VD55G1_DEFAULT_MODE;
+	struct vd55g1 *sensor = to_vd55g1(sd);
+	struct v4l2_subdev_format fmt = { 0 };
+#if !KERNEL_LACKS_STREAMS_API
+	struct v4l2_subdev_route routes[] = { 0 };
+	struct v4l2_subdev_krouting routing = {
+	    .num_routes = ARRAY_SIZE(routes),
+	    .routes = routes,
+	};
+	int ret;
+
+	/* Needed by v4l2_subdev_s_stream_helper(), even with 1 stream only */
+	routes[0].flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE;
+	ret = v4l2_subdev_set_routing(sd, sd_state, &routing);
+	if (ret)
+		return ret;
+#endif
+
+	vd55g1_update_img_pad_format(sensor, &vd55g1_supported_modes[def_mode],
+				     VD55G1_MEDIA_BUS_FMT_DEF, &fmt.format);
+
+#if KERNEL_LACKS_SUBDEV_STATES
+	return vd55g1_set_pad_fmt(sd, cfg, &fmt);
+#else
+	return vd55g1_set_pad_fmt(sd, sd_state, &fmt);
+#endif
+}
+
+#if KERNEL_LACKS_SUBDEV_STATES
 static int vd55g1_enum_frame_size(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_pad_config *cfg,
 				  struct v4l2_subdev_frame_size_enum *fse)
@@ -1542,64 +1771,94 @@ static int vd55g1_enum_frame_size(struct v4l2_subdev *sd,
 				  struct v4l2_subdev_frame_size_enum *fse)
 #endif
 {
-	if (fse->index >= ARRAY_SIZE(vd55g1_mode_data))
+	if (fse->index >= ARRAY_SIZE(vd55g1_supported_modes))
 		return -EINVAL;
 
-	fse->min_width = vd55g1_mode_data[fse->index].width;
+	fse->min_width = vd55g1_supported_modes[fse->index].width;
 	fse->max_width = fse->min_width;
-	fse->min_height = vd55g1_mode_data[fse->index].height;
+	fse->min_height = vd55g1_supported_modes[fse->index].height;
 	fse->max_height = fse->min_height;
 
 	return 0;
 }
 
-static const struct v4l2_subdev_core_ops vd55g1_core_ops = {
+#if KERNEL_LACKS_STREAMS_API
+/* Wrapper to enable/disable_streams() */
+static int vd55g1_s_stream(struct v4l2_subdev *sd, int enable)
+{
+	if (enable)
+		return vd55g1_enable_streams(sd);
+	return vd55g1_disable_streams(sd);
+}
+#endif
+
+#if !KERNEL_LACKS_INIT_STATE
+static const struct v4l2_subdev_internal_ops vd55g1_internal_ops = {
+	.init_state = vd55g1_init_state,
+};
+#endif
+
+static const struct v4l2_subdev_pad_ops vd55g1_pad_ops = {
+#if KERNEL_LACKS_INIT_STATE
+	.init_cfg = vd55g1_init_state,
+#endif
+	.enum_mbus_code = vd55g1_enum_mbus_code,
+#if KERNEL_LACKS_ACTIVE_STATES
+	.get_fmt = vd55g1_get_pad_fmt,
+#else
+	.get_fmt = v4l2_subdev_get_fmt,
+#endif
+	.set_fmt = vd55g1_set_pad_fmt,
+	.get_selection = vd55g1_get_selection,
+	.enum_frame_size = vd55g1_enum_frame_size,
+#if !KERNEL_LACKS_STREAMS_API
+	.enable_streams = vd55g1_enable_streams,
+	.disable_streams = vd55g1_disable_streams,
+#endif
 };
 
 static const struct v4l2_subdev_video_ops vd55g1_video_ops = {
+#if KERNEL_LACKS_STREAMS_API
 	.s_stream = vd55g1_s_stream,
-};
-
-static const struct v4l2_subdev_pad_ops vd55g1_pad_ops = {
-	.init_cfg = vd55g1_init_cfg,
-	.enum_mbus_code = vd55g1_enum_mbus_code,
-	.get_fmt = vd55g1_get_fmt,
-	.set_fmt = vd55g1_set_fmt,
-	.get_selection = vd55g1_get_selection,
-	.enum_frame_size = vd55g1_enum_frame_size,
+#else
+	.s_stream = v4l2_subdev_s_stream_helper,
+#endif
 };
 
 static const struct v4l2_subdev_ops vd55g1_subdev_ops = {
-	.core = &vd55g1_core_ops,
 	.video = &vd55g1_video_ops,
 	.pad = &vd55g1_pad_ops,
-};
-
-static const struct media_entity_operations vd55g1_subdev_entity_ops = {
-	.link_validate = v4l2_subdev_link_validate,
 };
 
 static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
 	int temperature;
-	int ret;
+	int ret = 0;
+
+	/* Interact with HW only when it is powered ON */
+	if (!pm_runtime_get_if_in_use(&client->dev))
+		return 0;
 
 	switch (ctrl->id) {
-	case V4L2_CID_PIXEL_RATE:
-		ret = __v4l2_ctrl_s_ctrl_int64(ctrl, get_pixel_rate(sensor));
-		break;
 	case V4L2_CID_TEMPERATURE:
 		ret = vd55g1_get_temp(sensor, &temperature);
 		if (ret)
 			break;
 		ret = __v4l2_ctrl_s_ctrl(ctrl, temperature);
 		break;
+	case V4L2_CID_EXPOSURE_AUTO:
+		ret = vd55g1_read_expo_cluster(sensor);
+		break;
 	default:
 		ret = -EINVAL;
 		break;
 	}
+
+	pm_runtime_mark_last_busy(&client->dev);
+	pm_runtime_put_autosuspend(&client->dev);
 
 	return ret;
 }
@@ -1607,56 +1866,85 @@ static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
+	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	unsigned int frame_length = 0;
 	unsigned int expo_max;
-	int ret;
+	unsigned int hblank = get_hblank_min(sensor);
+	bool is_auto = false;
+#if KERNEL_LACKS_ACTIVE_STATES
+	const struct v4l2_rect *crop = &sensor->active_crop;
+#elif KERNEL_LACKS_NEW_STATES_API
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+#endif
+	int ret = 0;
 
+	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
+		return 0;
+
+	/* Update controls state, range, etc. whatever the state of the HW */
 	switch (ctrl->id) {
-	case V4L2_CID_VFLIP:
-	case V4L2_CID_HFLIP:
-		if (sensor->streaming) {
-			ret = -EBUSY;
-			break;
-		}
-		if (ctrl->id == V4L2_CID_VFLIP)
-			sensor->vflip = ctrl->val;
-		if (ctrl->id == V4L2_CID_HFLIP)
-			sensor->hflip = ctrl->val;
-		ret = 0;
-		break;
-	case V4L2_CID_TEST_PATTERN:
-		/* Can't be done while streaming because of duster disabling */
-		sensor->pattern = ctrl->val;
-		ret = 0;
+	case V4L2_CID_VBLANK:
+		frame_length = crop->height + ctrl->val;
+		expo_max = frame_length - VD55G1_EXPO_MAX_TERM;
+		ret = __v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max,
+					       1, VD55G1_EXPO_DEF);
 		break;
 	case V4L2_CID_EXPOSURE_AUTO:
-		ret = vd55g1_update_exposure_auto(sensor, ctrl->val);
+		is_auto = (ctrl->val == V4L2_EXPOSURE_AUTO);
+#if KERNEL_LACKS_LOCKED_GRAB
+		mutex_unlock(&sensor->lock);
+		v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
+		v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
+		mutex_lock(&sensor->lock);
+#else
+		__v4l2_ctrl_grab(sensor->ae_lock_ctrl, !is_auto);
+		__v4l2_ctrl_grab(sensor->ae_bias_ctrl, !is_auto);
+#endif
 		break;
-	case V4L2_CID_ANALOGUE_GAIN:
-		ret = vd55g1_update_analog_gain(sensor, ctrl->val);
+	case V4L2_CID_HDR_SENSOR_MODE:
+		/* Discriminate if the userspace changed the control value */
+		if (ctrl->val != ctrl->cur.val) {
+			/* Max horizontal blanking changes with hdr mode */
+			ret = __v4l2_ctrl_modify_range(sensor->hblank_ctrl,
+						       hblank, hblank, 1,
+						       hblank);
+		}
 		break;
-	case V4L2_CID_DIGITAL_GAIN:
-		ret = vd55g1_update_digital_gain(sensor, ctrl->val);
+	default:
 		break;
-	case V4L2_CID_EXPOSURE:
-		ret = vd55g1_update_exposure(sensor, ctrl->val);
+	}
+
+	/* Don't modify hardware if controls modification failed */
+	if (ret)
+		return ret;
+
+	/* Interact with HW only when it is powered ON */
+	if (!pm_runtime_get_if_in_use(&client->dev))
+		return 0;
+
+	switch (ctrl->id) {
+	case V4L2_CID_HFLIP:
+		ret = vd55g1_write(sensor, VD55G1_REG_ORIENTATION,
+				   sensor->hflip_ctrl->val |
+					   (sensor->vflip_ctrl->val << 1),
+				   NULL);
+		break;
+	case V4L2_CID_TEST_PATTERN:
+		ret = vd55g1_update_patgen(sensor, ctrl->val);
+		break;
+	case V4L2_CID_EXPOSURE_AUTO:
+		ret = vd55g1_update_expo_cluster(sensor, is_auto);
 		break;
 	case V4L2_CID_3A_LOCK:
-		ret = vd55g1_lock_exposure(sensor, ctrl);
-		break;
-	case V4L2_CID_DARKCAL_PEDESTAL:
-		ret = vd55g1_update_darkcal_pedestal(sensor, ctrl->val);
-		break;
-	case V4L2_CID_VBLANK:
-		ret = vd55g1_update_vblank(sensor, ctrl->val);
-		/* Max exposure changes with vblank */
-		expo_max = sensor->frame_length - VD55G1_EXPO_MAX_TERM;
-		__v4l2_ctrl_modify_range(sensor->expo_ctrl, 0, expo_max, 1,
-					 VD55G1_EXPO_DEF);
-		break;
-	case V4L2_CID_HBLANK:
-		/* Read only control, can only be activated by V4L2 framework */
-		ret = 0;
+		ret = vd55g1_lock_exposure(sensor, ctrl->val);
 		break;
 	case V4L2_CID_AUTO_EXPOSURE_BIAS:
 		/*
@@ -1665,23 +1953,33 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		 */
 		ret = vd55g1_update_exposure_target(sensor, ctrl->val);
 		break;
-	case V4L2_CID_SLAVE:
-		sensor->is_slave = ctrl->val;
+	case V4L2_CID_VBLANK:
+		ret = vd55g1_update_frame_length(sensor, frame_length);
+		break;
+	case V4L2_CID_SLAVE_MODE:
+		ret = vd55g1_update_gpios(sensor, VD55G1_VTSLAVE_GPIO);
+		vd55g1_write(sensor, VD55G1_REG_VT_CTRL, ctrl->val, &ret);
+		break;
+	case V4L2_CID_DARKCAL_PEDESTAL:
 		ret = 0;
+		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(0), ctrl->val,
+			     &ret);
+		vd55g1_write(sensor, VD55G1_REG_DARKCAL_PEDESTAL(1), ctrl->val,
+			     &ret);
 		break;
 	case V4L2_CID_FLASH_LED_MODE:
-		ret = vd55g1_update_flash(sensor, ctrl->val);
+		ret = vd55g1_update_gpios(sensor, sensor->ext_leds_mask);
 		break;
 	case V4L2_CID_HDR_SENSOR_MODE:
-		sensor->hdr = ctrl->val;
-		/* Max blanking changes with hdr mode */
-		vd55g1_update_hblank_ctrl(sensor);
-		ret = 0;
+		ret = vd55g1_update_hdr_mode(sensor);
 		break;
 	default:
 		ret = -EINVAL;
 		break;
 	}
+
+	pm_runtime_mark_last_busy(&client->dev);
+	pm_runtime_put_autosuspend(&client->dev);
 
 	return ret;
 }
@@ -1714,7 +2012,7 @@ static const struct v4l2_ctrl_config vd55g1_darkcal_pedestal_ctrl = {
 
 static const struct v4l2_ctrl_config vd55g1_slave_ctrl = {
 	.ops		= &vd55g1_ctrl_ops,
-	.id		= V4L2_CID_SLAVE,
+	.id		= V4L2_CID_SLAVE_MODE,
 	.name		= "VT Slave Mode",
 	.type		= V4L2_CTRL_TYPE_BOOLEAN,
 	.min		= 0,
@@ -1723,100 +2021,133 @@ static const struct v4l2_ctrl_config vd55g1_slave_ctrl = {
 	.def		= 1,
 };
 
+#if KERNEL_LACKS_HDR_CTRL
 static const struct v4l2_ctrl_config vd55g1_hdr_ctrl = {
 	.ops		= &vd55g1_ctrl_ops,
 	.id		= V4L2_CID_HDR_SENSOR_MODE,
 	.name		= "HDR Sensor Mode",
 	.type		= V4L2_CTRL_TYPE_MENU,
 	.min		= 0,
-	.max		= ARRAY_SIZE(vd55g1_hdr_mode_menu) - 1,
+	.max		= ARRAY_SIZE(vd55g1_hdr_menu) - 1,
 	.def		= VD55G1_NO_HDR,
-	.qmenu		= vd55g1_hdr_mode_menu,
+	.qmenu		= vd55g1_hdr_menu,
 };
+#endif
 
-static int vd55g1_init_controls(struct vd55g1_dev *sensor)
+static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 {
 	const struct v4l2_ctrl_ops *ops = &vd55g1_ctrl_ops;
 	struct v4l2_ctrl_handler *hdl = &sensor->ctrl_handler;
-	const struct vd55g1_mode_info *cur_mode = sensor->current_mode;
 	struct v4l2_ctrl *ctrl;
-	unsigned int patgen_size = ARRAY_SIZE(vd55g1_test_pattern_menu) - 1;
-	unsigned int hblank = sensor->line_length - sensor->current_mode->width;
-	unsigned int expo_mode = sensor->expo_state == VD55G1_EXP_AUTO ?
-		V4L2_EXPOSURE_AUTO :  V4L2_EXPOSURE_MANUAL;
-	unsigned int vblank_default = sensor->vblank_min * 2 +
-		sensor->current_mode->crop.height;
-	unsigned int vblank_max = 0xffff - cur_mode->crop.height * 2;
+#if !KERNEL_LACKS_DEVICE_PROPERTIES
+	struct v4l2_fwnode_device_properties fwnode_props;
+#endif
+	struct vblank_limits vblank;
+	unsigned int hblank;
 	int ret;
 
 	v4l2_ctrl_handler_init(hdl, 16);
+#if KERNEL_LACKS_ACTIVE_STATES
 	/* we can use our own mutex for the ctrl lock */
 	hdl->lock = &sensor->lock;
-	v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_AUTO_EXPOSURE_BIAS,
-			       ARRAY_SIZE(vd55g1_ev_bias_menu) - 1,
-			       ARRAY_SIZE(vd55g1_ev_bias_menu) / 2,
-			       vd55g1_ev_bias_menu);
+#endif
+
+	/* Flip cluster */
+	sensor->hflip_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP,
+					       0, 1, 1, 0);
+	sensor->vflip_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VFLIP,
+					       0, 1, 1, 0);
+	v4l2_ctrl_cluster(2, &sensor->hflip_ctrl);
+
+	/* Exposition cluster */
+	sensor->ae_ctrl = v4l2_ctrl_new_std_menu(hdl, ops,
+						 V4L2_CID_EXPOSURE_AUTO, 1,
+						 ~0x3, V4L2_EXPOSURE_AUTO);
+	sensor->again_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN,
+					       0, 0x1c, 1, VD55G1_AGAIN_DEF);
+	sensor->dgain_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN,
+					       256, 0xffff, 1,
+					       VD55G1_DGAIN_DEF);
+	sensor->expo_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 0,
+					      VD55G1_FRAME_LENGTH_DEF -
+					      VD55G1_EXPO_MAX_TERM,
+					      1, VD55G1_EXPO_DEF);
+	v4l2_ctrl_auto_cluster(4, &sensor->ae_ctrl, V4L2_EXPOSURE_MANUAL, true);
+
+	sensor->patgen_ctrl =
+		v4l2_ctrl_new_std_menu_items(hdl, ops, V4L2_CID_TEST_PATTERN,
+					     ARRAY_SIZE(vd55g1_tp_menu) - 1, 0,
+					     0, vd55g1_tp_menu);
 	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
 				      ARRAY_SIZE(link_freq) - 1, 0, link_freq);
-	ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
-	v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_EXPOSURE_AUTO, 1, ~0x3,
-			       expo_mode);
-	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_ANALOGUE_GAIN, 0, 24, 1,
-			  sensor->analog_gain);
-	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_DIGITAL_GAIN, 256, 2048, 1,
-			  sensor->digital_gain);
-	v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK, 0, 1, 0, 0);
-	ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_temp_ctrl, NULL);
-	ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE | V4L2_CTRL_FLAG_READ_ONLY;
-	v4l2_ctrl_new_custom(hdl, &vd55g1_darkcal_pedestal_ctrl, NULL);
-	v4l2_ctrl_new_std_menu(hdl, ops, V4L2_CID_FLASH_LED_MODE,
-			       V4L2_FLASH_LED_MODE_FLASH, ~0x7,
-			       sensor->flash_en);
-
-	/*
-	 * Keep a pointer to these controls as we need to update them when
-	 * setting the format
-	 */
+	if (ctrl)
+		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	sensor->pixel_rate_ctrl = v4l2_ctrl_new_std(hdl, ops,
 						    V4L2_CID_PIXEL_RATE, 1,
 						    INT_MAX, 1,
 						    get_pixel_rate(sensor));
 	if (sensor->pixel_rate_ctrl)
 		sensor->pixel_rate_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
-	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
-						vblank_default, vblank_max,
-						1, sensor->vblank);
-	hblank = sensor->line_length - sensor->current_mode->width;
+	sensor->ae_lock_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK,
+						 0, 1, 0, 0);
+	sensor->ae_bias_ctrl =
+		v4l2_ctrl_new_int_menu(hdl, ops,
+				       V4L2_CID_AUTO_EXPOSURE_BIAS,
+				       ARRAY_SIZE(vd55g1_ev_bias_menu) - 1,
+				       ARRAY_SIZE(vd55g1_ev_bias_menu) / 2,
+				       vd55g1_ev_bias_menu);
+	#if KERNEL_LACKS_HDR_CTRL
+	sensor->hdr_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_hdr_ctrl, NULL);
+	#else
+	sensor->hdr_ctrl =
+		v4l2_ctrl_new_std_menu_items(hdl, ops,
+					     V4L2_CID_HDR_SENSOR_MODE,
+					     ARRAY_SIZE(vd55g1_hdr_menu) - 1, 0,
+					     VD55G1_NO_HDR, vd55g1_hdr_menu);
+	#endif
+	hblank = get_hblank_min(sensor);
 	sensor->hblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
 						hblank, hblank, 1, hblank);
 	if (sensor->hblank_ctrl)
 		sensor->hblank_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
-	sensor->vflip_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VFLIP,
-					       0, 1, 1, sensor->vflip);
-	sensor->hflip_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HFLIP,
-					       0, 1, 1, sensor->hflip);
-	sensor->pattern_ctrl =
-		v4l2_ctrl_new_std_menu_items(hdl, ops, V4L2_CID_TEST_PATTERN,
-					     patgen_size, 0, 0,
-					     vd55g1_test_pattern_menu);
-	sensor->slave_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_slave_ctrl,
-						  NULL);
-	sensor->expo_ctrl =
-		v4l2_ctrl_new_std(hdl, ops, V4L2_CID_EXPOSURE, 0,
-				  sensor->frame_length - VD55G1_EXPO_MAX_TERM,
-				  1, sensor->manual_expo);
-	sensor->hdr_ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_hdr_ctrl, NULL);
+	vblank = get_vblank_limits(sensor);
+	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
+						vblank.min, vblank.max,
+						1, vblank.def);
+	ctrl = v4l2_ctrl_new_custom(hdl, &vd55g1_temp_ctrl, NULL);
+	if (ctrl)
+		ctrl->flags |= V4L2_CTRL_FLAG_VOLATILE |
+			       V4L2_CTRL_FLAG_READ_ONLY;
+	sensor->darkcal_ctrl =
+		v4l2_ctrl_new_custom(hdl, &vd55g1_darkcal_pedestal_ctrl, NULL);
+
+	/* Additional controls based on device tree properties */
+	if (sensor->ext_vt_sync)
+		sensor->slave_ctrl = v4l2_ctrl_new_custom(hdl,
+							  &vd55g1_slave_ctrl,
+							  NULL);
+	if (sensor->ext_leds_mask) {
+		sensor->led_ctrl =
+			v4l2_ctrl_new_std_menu(hdl, ops,
+					       V4L2_CID_FLASH_LED_MODE,
+					       V4L2_FLASH_LED_MODE_FLASH, 0,
+					       V4L2_FLASH_LED_MODE_NONE);
+	}
 
 	if (hdl->error) {
 		ret = hdl->error;
 		goto free_ctrls;
 	}
 
-	/* Disable this control if not possible by device tree */
-	if (!vd55g1_can_be_slave(sensor)) {
-		v4l2_ctrl_s_ctrl(sensor->slave_ctrl, false);
-		v4l2_ctrl_grab(sensor->slave_ctrl, true);
-	}
+#if !KERNEL_LACKS_DEVICE_PROPERTIES
+	ret = v4l2_fwnode_device_parse(&sensor->i2c_client->dev, &fwnode_props);
+	if (ret)
+		goto free_ctrls;
+
+	ret = v4l2_ctrl_new_fwnode_properties(hdl, ops, &fwnode_props);
+	if (ret)
+		goto free_ctrls;
+#endif
 
 	sensor->sd.ctrl_handler = hdl;
 	return 0;
@@ -1826,105 +2157,93 @@ free_ctrls:
 	return ret;
 }
 
-static int vd55g1_detect_cut_version(struct vd55g1_dev *sensor)
+static int vd55g1_check_sensor_revision(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	int device_rev;
+	u64 device_rev;
+	int ret;
 
-	device_rev = vd55g1_read_reg(sensor, VD55G1_REG_REVISION);
-	if (device_rev < 0)
-		return device_rev;
-
-	switch (device_rev) {
-	case VD55G1_REVISION_CUT_1:
-		dev_err(&client->dev, "Cut 1 is not supported\n");
-		return -ENODEV;
-	case VD55G1_REVISION_CUT_2:
-		dev_dbg(&client->dev, "Cut 2 detected\n");
-		return 0;
-	default:
-		dev_err(&client->dev, "Unable to detect cut version (0x%x)\n",
-			device_rev);
-		return -ENODEV;
-	}
-}
-
-static int vd55g1_detect(struct vd55g1_dev *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	int ret, id = 0;
-
-	id = vd55g1_read_reg(sensor, VD55G1_REG_MODEL_ID);
-	if (id < 0)
-		return id;
-
-	if (id != VD55G1_MODEL_ID) {
-		dev_warn(&client->dev, "Unsupported sensor id %x", id);
-		return -ENODEV;
-	}
-
-	ret = vd55g1_detect_cut_version(sensor);
+	ret = vd55g1_read(sensor, VD55G1_REG_REVISION, &device_rev, NULL);
 	if (ret)
 		return ret;
+
+	if (device_rev != VD55G1_REVISION_CCB) {
+		dev_err(&client->dev, "Unsupported sensor revision (0x%x)\n",
+			(u16)device_rev);
+		return -ENODEV;
+	}
 
 	return 0;
 }
 
-/* Power/clock management functions */
+static int vd55g1_detect(struct vd55g1 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	u64 id;
+	int ret;
+
+	ret = vd55g1_read(sensor, VD55G1_REG_MODEL_ID, &id, NULL);
+	if (ret)
+		return ret;
+
+	if (id != VD55G1_MODEL_ID) {
+		dev_warn(&client->dev, "Unsupported sensor id %x", (u32)id);
+		return -ENODEV;
+	}
+
+	return vd55g1_check_sensor_revision(sensor);
+}
+
 static int vd55g1_power_on(struct device *dev)
 {
-	struct i2c_client *client = to_i2c_client(dev);
-	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 	int ret;
 
 	ret = regulator_bulk_enable(ARRAY_SIZE(vd55g1_supply_name),
 				    sensor->supplies);
 	if (ret) {
-		dev_err(&client->dev, "failed to enable regulators %d", ret);
+		dev_err(dev, "Failed to enable regulators %d", ret);
 		return ret;
 	}
 
 	ret = clk_prepare_enable(sensor->xclk);
 	if (ret) {
-		dev_err(&client->dev, "failed to enable clock %d", ret);
+		dev_err(dev, "Failed to enable clock %d", ret);
 		goto disable_bulk;
 	}
 
-	if (sensor->reset_gpio) {
-		ret = vd55g1_apply_reset(sensor);
-		if (ret) {
-			dev_err(&client->dev, "sensor reset failed %d\n", ret);
-			goto disable_clock;
-		}
+	gpiod_set_value_cansleep(sensor->reset_gpio, 0);
+	usleep_range(5000, 10000);
+	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_READY_TO_BOOT, NULL);
+	if (ret) {
+		dev_err(dev, "Sensor reset failed %d\n", ret);
+		goto disable_clock;
 	}
 
 	ret = vd55g1_detect(sensor);
 	if (ret) {
-		dev_err(&client->dev, "sensor detect failed %d", ret);
+		dev_err(dev, "Sensor detect failed %d", ret);
 		goto disable_clock;
 	}
 
 	ret = vd55g1_patch(sensor);
 	if (ret) {
-		dev_err(&client->dev, "sensor patch failed %d", ret);
+		dev_err(dev, "Sensor patch failed %d", ret);
 		goto disable_clock;
 	}
 
-	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY,
-				VD55G1_TIMEOUT_MS);
-	if (ret)
-		return ret;
-
-	ret = vd55g1_configure(sensor);
+	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY, NULL);
 	if (ret) {
-		dev_err(&client->dev, "sensor configuration failed %d", ret);
+		dev_err(dev, "Sensor waiting after patch failed %d",
+			ret);
 		goto disable_clock;
 	}
 
 	return 0;
 
 disable_clock:
+	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
 	clk_disable_unprepare(sensor->xclk);
 disable_bulk:
 	regulator_bulk_disable(ARRAY_SIZE(vd55g1_supply_name),
@@ -1935,17 +2254,83 @@ disable_bulk:
 
 static int vd55g1_power_off(struct device *dev)
 {
-	struct i2c_client *client = to_i2c_client(dev);
-	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct v4l2_subdev *sd = dev_get_drvdata(dev);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 
 	clk_disable_unprepare(sensor->xclk);
-	regulator_bulk_disable(ARRAY_SIZE(vd55g1_supply_name),
-			       sensor->supplies);
+	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
+	regulator_bulk_disable(ARRAY_SIZE(sensor->supplies), sensor->supplies);
 	return 0;
 }
 
-static int vd55g1_parse_dt_gpios_array(struct vd55g1_dev *sensor,
+static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
+				 struct fwnode_handle *endpoint)
+{
+	struct i2c_client *client = sensor->i2c_client;
+#if KERNEL_LACKS_NEW_EP_ALLOC
+	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2 };
+#else
+	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2_DPHY };
+#endif
+	u8 n_lanes;
+	int ret = 0;
+
+#if KERNEL_LACKS_NEW_EP_ALLOC
+	struct v4l2_fwnode_endpoint *ep_ptr =
+		v4l2_fwnode_endpoint_alloc_parse(endpoint);
+	if (IS_ERR(ep_ptr))
+		return -EINVAL;
+	ep = (*ep_ptr);
+#else
+	ret = v4l2_fwnode_endpoint_alloc_parse(endpoint, &ep);
+	if (ret)
+		return -EINVAL;
+#endif
+
+	/* Check lanes number */
+	n_lanes = ep.bus.mipi_csi2.num_data_lanes;
+	if (n_lanes != 1) {
+		dev_err(&client->dev, "Sensor only supports 1 lane, found %d\n",
+			n_lanes);
+		ret = -EINVAL;
+		goto done;
+	}
+
+	/* Clock lane must be first */
+	if (ep.bus.mipi_csi2.clock_lane != 0) {
+		dev_err(&client->dev, "Clock lane must be mapped to lane 0\n");
+		ret = -EINVAL;
+		goto done;
+	}
+
+	/* Handle polarities in sensor configuration */
+	sensor->oif_ctrl = (ep.bus.mipi_csi2.lane_polarities[0] << 3) |
+			   (ep.bus.mipi_csi2.lane_polarities[1] << 6);
+
+	/* Check the link frequency set in device tree */
+	if (!ep.nr_of_link_frequencies) {
+		dev_err(&client->dev, "link-frequency property not found in DT\n");
+		ret = -EINVAL;
+		goto done;
+	}
+	if (ep.nr_of_link_frequencies != 1) {
+		dev_err(&client->dev, "Multiple link frequencies not supported\n");
+		ret = -EINVAL;
+		goto done;
+	}
+	link_freq[0] = ep.link_frequencies[0];
+
+done:
+#if KERNEL_LACKS_NEW_EP_ALLOC
+	v4l2_fwnode_endpoint_free(ep_ptr);
+#else
+	v4l2_fwnode_endpoint_free(&ep);
+#endif
+
+	return ret;
+}
+
+static int vd55g1_parse_dt_gpios_array(struct vd55g1 *sensor,
 				       char *prop_name, u32 *array, int *nb)
 {
 	struct i2c_client *client = sensor->i2c_client;
@@ -1954,246 +2339,310 @@ static int vd55g1_parse_dt_gpios_array(struct vd55g1_dev *sensor,
 
 	*nb = of_property_read_variable_u32_array(np, prop_name, array, 0,
 						  VD55G1_NB_GPIOS);
-	*nb = max(0, *nb);
-	if (*nb > 0) {
-		for (i = 0; i < *nb;  i++) {
-			if (array[i] >= VD55G1_NB_GPIOS) {
-				dev_err(&client->dev, "invalid GPIO %d for leds\n",
-					array[i]);
-				return -EINVAL;
-			}
+	if (*nb == -EINVAL) {
+		/* Property not found */
+		*nb = 0;
+		return 0;
+	} else if (*nb < 0) {
+		dev_err(&client->dev, "Failed to read %s prop\n", prop_name);
+		return *nb;
+	}
+
+	for (i = 0; i < *nb;  i++) {
+		if (array[i] >= VD55G1_NB_GPIOS) {
+			dev_err(&client->dev, "Invalid GPIO number %d\n",
+				array[i]);
+			return -EINVAL;
 		}
 	}
 
 	return 0;
 }
 
-static int vd55g1_parse_dt_gpios(struct vd55g1_dev *sensor)
+static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	struct device_node *np = client->dev.of_node;
-	struct vd55g1_gpios *gpios = &sensor->gpios;
-	int nb_gpios_leds, nb_gpios_out;
+	u32 led_gpios[VD55G1_NB_GPIOS];
+	int nb_gpios_leds;
+	u32 out_sync_gpios[VD55G1_NB_GPIOS];
+	int nb_gpios_out;
+	u32 in_sync_gpio;
+	unsigned int i;
 	int ret;
-	unsigned int i, j;
 
-	memset(gpios->leds, ~0,
-	       ARRAY_SIZE(gpios->leds) * sizeof(gpios->leds[0]));
-	memset(gpios->out_sync, ~0,
-	       ARRAY_SIZE(gpios->out_sync) * sizeof(gpios->out_sync[0]));
-	gpios->in_sync = ~0;
+	/* Initialize GPIOs to default */
+	for (i = 0; i < VD55G1_NB_GPIOS; i++)
+		sensor->gpios[i] = VD55G1_GPIO_MODE_IN;
+	sensor->ext_leds_mask = 0;
 
-	ret = vd55g1_parse_dt_gpios_array(sensor, "st,leds",
-					  (u32 *)&gpios->leds,
+	/* Take into account optional 'st,leds' output for GPIOs */
+	ret = vd55g1_parse_dt_gpios_array(sensor, "st,leds", led_gpios,
 					  &nb_gpios_leds);
 	if (ret)
 		return ret;
 
-	ret = vd55g1_parse_dt_gpios_array(sensor, "st,out-sync",
-					  (u32 *)&gpios->out_sync,
+	for (i = 0; i < nb_gpios_leds; i++) {
+		sensor->gpios[led_gpios[i]] = VD55G1_GPIO_MODE_STROBE;
+		set_bit(led_gpios[i], &sensor->ext_leds_mask);
+	}
+
+	/* Take into account optional 'st,out-sync' output for GPIOs */
+	ret = vd55g1_parse_dt_gpios_array(sensor, "st,out-sync", out_sync_gpios,
 					  &nb_gpios_out);
 	if (ret)
 		return ret;
 
-	ret = of_property_read_u32(np, "st,in-sync", &gpios->in_sync);
-	if (ret == 0) {
-		if (gpios->in_sync != 0) {
-			dev_err(&client->dev, "input sync gpio must be 0 if present, found %d\n",
-				gpios->in_sync);
+	for (i = 0; i < nb_gpios_out; i++) {
+		if (sensor->gpios[out_sync_gpios[i]] != VD55G1_GPIO_MODE_IN) {
+			dev_err(&client->dev, "Multiple use of GPIO %d\n",
+				out_sync_gpios[i]);
 			return -EINVAL;
 		}
-
-		/* Check no other gpios array use gpio 0 */
-		for (i = 0; i < nb_gpios_leds;  i++) {
-			if (gpios->leds[i] == gpios->in_sync) {
-				dev_err(&client->dev, "in-sync GPIO %d is used by another led gpio\n",
-					gpios->in_sync);
-				return -EINVAL;
-			}
-		}
-		for (i = 0; i < nb_gpios_out;  i++) {
-			if (gpios->out_sync[i] == gpios->in_sync) {
-				dev_err(&client->dev, "in-sync GPIO %d is used by another out-sync gpio\n",
-					gpios->in_sync);
-				return -EINVAL;
-			}
-		}
-
-		dev_dbg(&client->dev, "GPIO %d in input slave mode\n",
-			gpios->in_sync);
-
-		sensor->is_slave = true;
+		sensor->gpios[out_sync_gpios[i]] = VD55G1_GPIO_MODE_FSYNC_OUT;
 	}
 
-	/* Check mutual exclusivity between leds and out_sync */
-	for (i = 0; i < nb_gpios_leds;  i++) {
-		for (j = 0; j < nb_gpios_out;  j++) {
-			if (gpios->leds[i] == gpios->out_sync[j]) {
-				dev_err(&client->dev, "GPIO %d used in both leds and out-sync\n",
-					gpios->leds[i]);
-				return -EINVAL;
-			}
+	/* Take into account optional 'st,in-sync' input for GPIO0 */
+	ret = of_property_read_u32(np, "st,in-sync", &in_sync_gpio);
+	if (ret < 0 && ret != -EINVAL) {
+		dev_err(&client->dev, "Failed to read st,in-sync prop\n");
+		return ret;
+	} else if (ret == -EINVAL) {
+		sensor->ext_vt_sync = false;
+	} else {
+		if (in_sync_gpio != VD55G1_VTSLAVE_GPIO) {
+			dev_err(&client->dev, "in-sync GPIO must be gpio0\n");
+			return -EINVAL;
 		}
+		if (sensor->gpios[in_sync_gpio] != VD55G1_GPIO_MODE_IN) {
+			dev_err(&client->dev, "Multiple use of GPIO %d\n",
+				in_sync_gpio);
+			return -EINVAL;
+		}
+		sensor->gpios[in_sync_gpio] = VD55G1_GPIO_MODE_VTSLAVE;
+		sensor->ext_vt_sync = true;
 	}
 
 	return 0;
+}
+
+static int vd55g1_parse_dt(struct vd55g1 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+	struct device *dev = &client->dev;
+	struct fwnode_handle *endpoint;
+	int ret;
+
+#if KERNEL_VERSION(5, 2, 0) > LINUX_VERSION_CODE
+	endpoint =
+		fwnode_graph_get_next_endpoint(of_fwnode_handle(dev->of_node),
+					       NULL);
+#else
+	endpoint = fwnode_graph_get_endpoint_by_id(dev_fwnode(dev), 0, 0, 0);
+#endif
+	if (!endpoint) {
+		dev_err(dev, "Endpoint node not found\n");
+		return -EINVAL;
+	}
+
+	ret = vd55g1_check_csi_conf(sensor, endpoint);
+	fwnode_handle_put(endpoint);
+	if (ret)
+		return ret;
+
+	return vd55g1_parse_dt_gpios(sensor);
+}
+
+static int vd55g1_subdev_init(struct vd55g1 *sensor)
+{
+	struct i2c_client *client = sensor->i2c_client;
+#if KERNEL_LACKS_ACTIVE_STATES
+	unsigned int def_mode = VD55G1_DEFAULT_MODE;
+#endif
+	int ret;
+
+#if KERNEL_LACKS_ACTIVE_STATES
+	mutex_init(&sensor->lock);
+#endif
+
+	/* Init sub device */
+	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
+#if !KERNEL_LACKS_INIT_STATE
+	sensor->sd.internal_ops = &vd55g1_internal_ops;
+#endif
+
+	/* Init source pad */
+	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
+	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
+	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
+	if (ret) {
+		dev_err(&client->dev, "Failed to init media entity : %d", ret);
+		return ret;
+	}
+
+	sensor->streaming = false;
+#if KERNEL_LACKS_ACTIVE_STATES
+	vd55g1_update_img_pad_format(sensor, &vd55g1_supported_modes[def_mode],
+				     VD55G1_MEDIA_BUS_FMT_DEF,
+				     &sensor->active_fmt);
+	sensor->active_crop.width = vd55g1_supported_modes[def_mode].width;
+	sensor->active_crop.height = vd55g1_supported_modes[def_mode].height;
+	sensor->active_crop.left = 0;
+	sensor->active_crop.top = 0;
+#else
+	sensor->sd.state_lock = sensor->ctrl_handler.lock;
+	ret = v4l2_subdev_init_finalize(&sensor->sd);
+	if (ret) {
+		dev_err(&client->dev, "Subdev init error: %d", ret);
+		goto err_ctrls;
+	}
+#endif
+
+	/*
+	 * Initiliaze controls after v4l2_subdev_init_finalize() to make sure
+	 * default values are set.
+	 */
+	ret = vd55g1_init_ctrls(sensor);
+	if (ret) {
+		dev_err(&client->dev, "Controls initialization failed %d", ret);
+		goto err_media;
+	}
+
+	return ret;
+
+#if !KERNEL_LACKS_ACTIVE_STATES
+err_ctrls:
+	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
+#endif
+
+err_media:
+	media_entity_cleanup(&sensor->sd.entity);
+	return ret;
+}
+
+static void vd55g1_subdev_cleanup(struct vd55g1 *sensor)
+{
+	v4l2_async_unregister_subdev(&sensor->sd);
+#if KERNEL_LACKS_ACTIVE_STATES
+	mutex_destroy(&sensor->lock);
+#else
+	v4l2_subdev_cleanup(&sensor->sd);
+#endif
+	media_entity_cleanup(&sensor->sd.entity);
+	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
+}
+
+static int vd55g1_err_probe(struct device *dev, int ret, char *msg)
+{
+#if KERNEL_LACKS_DEV_ERR_PROBE
+	dev_err(dev, "%s", msg);
+	return ret;
+#else
+	return dev_err_probe(dev, ret, msg);
+#endif
 }
 
 static int vd55g1_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
-	struct fwnode_handle *handle;
-	struct vd55g1_dev *sensor;
+	struct vd55g1 *sensor;
 	int ret;
 
 	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
 	if (!sensor)
 		return -ENOMEM;
 
-	sensor->manual_expo = VD55G1_EXPO_DEF;
-	sensor->analog_gain = 19;
-	sensor->digital_gain = 256;
-
+	v4l2_i2c_subdev_init(&sensor->sd, client, &vd55g1_subdev_ops);
 	sensor->i2c_client = client;
-	sensor->streaming = false;
-	sensor->vflip = false;
-	sensor->hflip = false;
-	sensor->darkcal_pedestal = VD55G1_DARKCAL_PEDESTAL_DEF;
-	sensor->flash_en = false;
-	sensor->hdr = VD55G1_NO_HDR;
-	sensor->vblank = 4000;
-	sensor->vblank_min = VD55G1_MIN_VBLANK;
 
-	sensor->cold_start.expo = sensor->manual_expo;
-	sensor->cold_start.digital_gain = sensor->digital_gain;
-	sensor->cold_start.analog_gain = sensor->analog_gain;
+	ret = vd55g1_parse_dt(sensor);
+	if (ret)
+		return vd55g1_err_probe(dev, ret,
+					"Failed to parse Device Tree.");
 
-	sensor->current_mode = &vd55g1_mode_data[VD55G1_DEFAULT_MODE];
-
-	handle = fwnode_graph_get_next_endpoint(of_fwnode_handle(dev->of_node),
-						NULL);
-	if (!handle) {
-		dev_err(dev, "handle node not found\n");
-		return -EINVAL;
-	}
-
-	sensor->reset_gpio = devm_gpiod_get_optional(dev, "reset",
-						     GPIOD_OUT_HIGH);
-
-	ret = vd55g1_parse_dt_gpios(sensor);
-	if (ret) {
-		dev_err(dev, "Failed to get gpios\n");
-		return ret;
-	}
-
-	ret = vd55g1_tx_from_ep(sensor, handle);
-	fwnode_handle_put(handle);
-	if (ret) {
-		dev_err(dev, "Failed to parse handle %d\n", ret);
-		return ret;
-	}
+	/* Get (and check) resources : power regs, ext clock, reset gpio */
+	ret = vd55g1_get_regulators(sensor);
+	if (ret)
+		return vd55g1_err_probe(dev, ret, "Failed to get regulators.");
 
 	sensor->xclk = devm_clk_get(dev, NULL);
 	if (IS_ERR(sensor->xclk)) {
-		dev_err(dev, "failed to get xclk\n");
-		return PTR_ERR(sensor->xclk);
+		return vd55g1_err_probe(dev, PTR_ERR(sensor->xclk),
+					"Failed to get xclk.");
 	}
-	sensor->clk_freq = clk_get_rate(sensor->xclk);
-	if (sensor->clk_freq < 6 * HZ_PER_MHZ ||
-	    sensor->clk_freq > 27 * HZ_PER_MHZ) {
-		dev_err(dev, "Only 6Mhz-27Mhz clock range supported. provide %lu MHz\n",
-			sensor->clk_freq / HZ_PER_MHZ);
-		return -EINVAL;
-	}
-
-	v4l2_i2c_subdev_init(&sensor->sd, client, &vd55g1_subdev_ops);
-	sensor->sd.flags |= V4L2_SUBDEV_FL_HAS_DEVNODE;
-	sensor->pad.flags = MEDIA_PAD_FL_SOURCE;
-	sensor->sd.entity.ops = &vd55g1_subdev_entity_ops;
-	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
-
-	ret = vd55g1_get_regulators(sensor);
-	if (ret) {
-		dev_err(&client->dev, "failed to get regulators %d", ret);
+	sensor->xclk_freq = clk_get_rate(sensor->xclk);
+	ret = vd55g1_prepare_clock_tree(sensor);
+	if (ret)
 		return ret;
-	}
 
-	vd55g1_fill_framefmt(sensor, sensor->current_mode, &sensor->fmt,
-			     VD55G1_MEDIA_BUS_FMT_DEF);
+	sensor->reset_gpio =
+		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(sensor->reset_gpio))
+		return vd55g1_err_probe(dev, PTR_ERR(sensor->reset_gpio),
+					"Failed to get reset gpio.");
 
-	/* Check the sensor is the correct one and can be powered on */
+#if KERNEL_LACKS_CCI
+	sensor->regmap = devm_regmap_init_i2c(client, &vd55g1_regmap_config);
+#else
+	sensor->regmap = devm_cci_regmap_init_i2c(client, 16);
+#endif
+	if (IS_ERR(sensor->regmap))
+		return vd55g1_err_probe(dev, PTR_ERR(sensor->regmap),
+					"Failed to init regmap.");
+
+	/* Detect if sensor is present and if its revision is supported */
 	ret = vd55g1_power_on(dev);
 	if (ret)
 		return ret;
 
-	mutex_init(&sensor->lock);
-
-	ret = vd55g1_update_vblank(sensor, VD55G1_FRAME_LENGTH_DEF -
-				   sensor->current_mode->crop.height);
-	if (ret)
-		goto error_power_off;
-
-	ret = vd55g1_init_controls(sensor);
+	ret = vd55g1_subdev_init(sensor);
 	if (ret) {
-		dev_err(&client->dev, "controls initialization failed %d", ret);
-		goto error_power_off;
+		dev_err(dev, "V4l2 init failed : %d", ret);
+		goto err_power_off;
 	}
-
-	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
-	if (ret) {
-		dev_err(&client->dev, "pads init failed %d", ret);
-		goto error_handler_free;
-	}
-
-	/* Enable runtime PM and turn off the device */
-	pm_runtime_set_active(dev);
-	pm_runtime_enable(dev);
-	pm_runtime_idle(dev);
 
 	ret = v4l2_async_register_subdev(&sensor->sd);
 	if (ret) {
-		dev_err(&client->dev, "async subdev register failed %d", ret);
-		goto error_pm_runtime;
+		dev_err(dev, "async subdev register failed %d", ret);
+		goto err_subdev;
 	}
 
-	pm_runtime_set_autosuspend_delay(&client->dev, 1000);
-	pm_runtime_use_autosuspend(&client->dev);
+	/* Enable pm_runtime and power off the sensor */
+	pm_runtime_set_active(dev);
+	pm_runtime_get_noresume(dev);
+	pm_runtime_enable(dev);
+	pm_runtime_set_autosuspend_delay(dev, 4000);
+	pm_runtime_use_autosuspend(dev);
+	pm_runtime_mark_last_busy(dev);
 
-	dev_dbg(&client->dev, "vd55g1 probe successfully");
+	dev_dbg(dev, "vd55g1 probe successfully");
 
 	return 0;
 
-error_pm_runtime:
-	pm_runtime_disable(&client->dev);
-	pm_runtime_set_suspended(&client->dev);
-	media_entity_cleanup(&sensor->sd.entity);
-error_handler_free:
-	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
-error_power_off:
-	mutex_destroy(&sensor->lock);
+err_subdev:
+	vd55g1_subdev_cleanup(sensor);
+err_power_off:
 	vd55g1_power_off(dev);
 
 	return ret;
 }
 
-#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_REMOVE_INT_RETURN
 static int vd55g1_remove(struct i2c_client *client)
 #else
 static void vd55g1_remove(struct i2c_client *client)
 #endif
 {
 	struct v4l2_subdev *sd = i2c_get_clientdata(client);
-	struct vd55g1_dev *sensor = to_vd55g1_dev(sd);
+	struct vd55g1 *sensor = to_vd55g1(sd);
 
-	v4l2_async_unregister_subdev(&sensor->sd);
-	mutex_destroy(&sensor->lock);
-	media_entity_cleanup(&sensor->sd.entity);
+	vd55g1_subdev_cleanup(sensor);
 
 	pm_runtime_disable(&client->dev);
 	if (!pm_runtime_status_suspended(&client->dev))
 		vd55g1_power_off(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
-#if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
+#if KERNEL_LACKS_REMOVE_INT_RETURN
 	return 0;
 #endif
 }
@@ -2225,5 +2674,6 @@ static struct i2c_driver vd55g1_i2c_driver = {
 module_i2c_driver(vd55g1_i2c_driver);
 
 MODULE_AUTHOR("Benjamin Mugnier <benjamin.mugnier@foss.st.com>");
+MODULE_AUTHOR("Sylvain Petinot <sylvain.petinot@foss.st.com>");
 MODULE_DESCRIPTION("VD55G1 camera subdev driver");
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

@@ -1,5 +1,6 @@
 .gitattributes export-ignore
 .gitignore export-ignore
+.github export-ignore
 Jenkinsfile export-ignore
 debian export-ignore
 dts/rpi1_to_4/pcb1637*.dts  export-ignore
