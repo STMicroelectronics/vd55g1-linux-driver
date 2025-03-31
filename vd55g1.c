@@ -949,7 +949,7 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
 	/* Double data rate */
-	u64 mipi_freq = link_freq[0] * 2;
+	u32 mipi_freq = link_freq[0] * 2;
 	u32 sys_clk, mipi_div, pixel_div;
 	int ret = 0;
 
@@ -964,7 +964,7 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 	if (mipi_freq < 250 * HZ_PER_MHZ ||
 	    mipi_freq > 1200 * HZ_PER_MHZ) {
 		dev_err(&client->dev,
-			"Only 250Mhz-1200Mhz link frequency range supported. Provided %llu MHz\n",
+			"Only 250Mhz-1200Mhz link frequency range supported. Provided %lu MHz\n",
 			mipi_freq / HZ_PER_MHZ);
 		return -EINVAL;
 	}
