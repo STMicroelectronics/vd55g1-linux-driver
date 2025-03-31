@@ -68,9 +68,6 @@ properties:
 
         properties:
           data-lanes:
-            description:
-              VD55G1 only has one data lane, and must be 1.
-            maxItems: 1
             items:
               const: 1
 
