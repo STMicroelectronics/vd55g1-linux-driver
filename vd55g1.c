@@ -2566,17 +2566,17 @@ static int vd55g1_probe(struct i2c_client *client)
 		return vd55g1_err_probe(dev, ret, "Failed to get regulators.");
 
 	sensor->xclk = devm_clk_get(dev, NULL);
-	if (IS_ERR(sensor->xclk)) {
+	if (IS_ERR(sensor->xclk))
 		return vd55g1_err_probe(dev, PTR_ERR(sensor->xclk),
 					"Failed to get xclk.");
-	}
+
 	sensor->xclk_freq = clk_get_rate(sensor->xclk);
 	ret = vd55g1_prepare_clock_tree(sensor);
 	if (ret)
 		return ret;
 
-	sensor->reset_gpio =
-		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	sensor->reset_gpio = devm_gpiod_get_optional(dev, "reset",
+						     GPIOD_OUT_HIGH);
 	if (IS_ERR(sensor->reset_gpio))
 		return vd55g1_err_probe(dev, PTR_ERR(sensor->reset_gpio),
 					"Failed to get reset gpio.");
