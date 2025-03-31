@@ -2615,8 +2615,6 @@ static int vd55g1_probe(struct i2c_client *client)
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_mark_last_busy(dev);
 
-	dev_dbg(dev, "vd55g1 probe successfully");
-
 	return 0;
 
 err_subdev:
