@@ -68,9 +68,8 @@ properties:
 
         properties:
           data-lanes:
-            maxItems: 1
             items:
-              const: 1
+              - const: 1
 
           link-frequencies:
             maxItems: 1
