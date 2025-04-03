@@ -131,9 +131,6 @@
 #define VD55G1_REG_AE_FORCE_COLDSTART			CCI_REG16_LE(0x0308)
 #define VD55G1_REG_AE_COLDSTART_EXP_TIME		CCI_REG32_LE(0x0374)
 #define VD55G1_REG_READOUT_CTRL				CCI_REG8(0x052e)
-#define VD55G1_REG_DARKCAL_CTRL				CCI_REG8(0x032a)
-#define VD55G1_DARKCAL_BYPASS				0
-#define VD55G1_DARKCAL_AUTO				1
 #define VD55G1_REG_DUSTER_CTRL				CCI_REG8(0x03ea)
 #define VD55G1_DUSTER_ENABLE				BIT(0)
 #define VD55G1_DUSTER_DISABLE				0
@@ -999,22 +996,16 @@ static int vd55g1_update_patgen(struct vd55g1 *sensor, u32 patgen_index)
 	};
 	u32 pattern = index2val[patgen_index];
 	u32 reg = pattern << VD55G1_PATGEN_TYPE_SHIFT;
-	u8 darkcal = VD55G1_DARKCAL_AUTO;
 	u8 duster = VD55G1_DUSTER_RING_ENABLE | VD55G1_DUSTER_DYN_ENABLE |
 		    VD55G1_DUSTER_ENABLE;
 	int ret = 0;
 
 	if (pattern != 0) {
 		reg |= VD55G1_PATGEN_ENABLE;
-		/*
-		 * Take care of dark calibaration and duster to not mess up the
-		 * test pattern output.
-		 */
-		darkcal = VD55G1_DARKCAL_BYPASS;
+		/* Take care of duster to not mess up the test pattern output */
 		duster = VD55G1_DUSTER_DISABLE;
 	}
 
-	vd55g1_write(sensor, VD55G1_REG_DARKCAL_CTRL, darkcal, &ret);
 	vd55g1_write(sensor, VD55G1_REG_DUSTER_CTRL, duster, &ret);
 	vd55g1_write(sensor, VD55G1_REG_PATGEN_CTRL, reg, &ret);
 
