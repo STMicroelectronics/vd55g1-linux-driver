@@ -2612,6 +2612,14 @@ static int vd55g1_probe(struct i2c_client *client)
 	if (ret)
 		return ret;
 
+	/* Enable pm_runtime and power off the sensor */
+	pm_runtime_set_active(dev);
+	pm_runtime_get_noresume(dev);
+	pm_runtime_enable(dev);
+	pm_runtime_set_autosuspend_delay(dev, 4000);
+	pm_runtime_use_autosuspend(dev);
+	pm_runtime_mark_last_busy(dev);
+
 	ret = vd55g1_subdev_init(sensor);
 	if (ret) {
 		dev_err(dev, "V4l2 init failed : %d", ret);
@@ -2624,19 +2632,13 @@ static int vd55g1_probe(struct i2c_client *client)
 		goto err_subdev;
 	}
 
-	/* Enable pm_runtime and power off the sensor */
-	pm_runtime_set_active(dev);
-	pm_runtime_get_noresume(dev);
-	pm_runtime_enable(dev);
-	pm_runtime_set_autosuspend_delay(dev, 4000);
-	pm_runtime_use_autosuspend(dev);
-	pm_runtime_mark_last_busy(dev);
-
 	return 0;
 
 err_subdev:
 	vd55g1_subdev_cleanup(sensor);
 err_power_off:
+	pm_runtime_disable(dev);
+	pm_runtime_put_noidle(dev);
 	vd55g1_power_off(dev);
 
 	return ret;
@@ -2657,6 +2659,7 @@ static void vd55g1_remove(struct i2c_client *client)
 	if (!pm_runtime_status_suspended(&client->dev))
 		vd55g1_power_off(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
+	pm_runtime_dont_use_autosuspend(&client->dev);
 #if KERNEL_LACKS_REMOVE_INT_RETURN
 	return 0;
 #endif
