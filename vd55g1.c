@@ -2056,7 +2056,9 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 #endif
 	struct vblank_limits vblank;
 	unsigned int hblank;
+#if !KERNEL_LACKS_DEVICE_PROPERTIES
 	int ret;
+#endif
 
 	v4l2_ctrl_handler_init(hdl, 16);
 #if KERNEL_LACKS_ACTIVE_STATES
@@ -2146,11 +2148,6 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 					       V4L2_FLASH_LED_MODE_NONE);
 	}
 
-	if (hdl->error) {
-		ret = hdl->error;
-		goto free_ctrls;
-	}
-
 #if !KERNEL_LACKS_DEVICE_PROPERTIES
 	ret = v4l2_fwnode_device_parse(&sensor->i2c_client->dev, &fwnode_props);
 	if (ret)
@@ -2164,9 +2161,11 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	sensor->sd.ctrl_handler = hdl;
 	return 0;
 
+#if !KERNEL_LACKS_DEVICE_PROPERTIES
 free_ctrls:
 	v4l2_ctrl_handler_free(hdl);
 	return ret;
+#endif
 }
 
 static int vd55g1_check_sensor_revision(struct vd55g1 *sensor)
