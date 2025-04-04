@@ -1019,6 +1019,8 @@ static int vd55g1_update_patgen(struct vd55g1 *sensor, u32 patgen_index)
 		    VD55G1_DUSTER_ENABLE;
 	int ret = 0;
 
+	BUILD_BUG_ON(ARRAY_SIZE(index2val) != ARRAY_SIZE(vd55g1_tp_menu));
+
 	if (pattern != 0) {
 		reg |= VD55G1_PATGEN_ENABLE;
 		/* Take care of duster to not mess up the test pattern output */
