@@ -1483,7 +1483,7 @@ static int vd55g1_disable_streams(struct v4l2_subdev *sd,
 	sensor->streaming = false;
 
 	pm_runtime_mark_last_busy(&client->dev);
-	__pm_runtime_put_autosuspend(&client->dev);
+	pm_runtime_put_autosuspend(&client->dev);
 
 	return ret;
 }
