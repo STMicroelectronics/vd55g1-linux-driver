@@ -39,6 +39,7 @@
 #include <linux/iopoll.h>
 #include <linux/module.h>
 #include <linux/pm_runtime.h>
+#include <linux/property.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #if KERNEL_VERSION(6, 12, 0) > LINUX_VERSION_CODE
