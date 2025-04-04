@@ -2345,20 +2345,26 @@ static int vd55g1_parse_dt_gpios_array(struct vd55g1 *sensor,
 				       char *prop_name, u32 *array, int *nb)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	struct device_node *np = client->dev.of_node;
+	struct device *dev = &client->dev;
 	unsigned int i;
+	int ret;
 
-	*nb = of_property_read_variable_u32_array(np, prop_name, array, 0,
-						  VD55G1_NB_GPIOS);
+#if KERNEL_VERSION(5, 3, 0) > LINUX_VERSION_CODE
+	*nb = device_property_read_u32_array(dev, prop_name, NULL, 0);
+#else
+	*nb = device_property_count_u32(dev, prop_name);
+#endif
 	if (*nb == -EINVAL) {
 		/* Property not found */
 		*nb = 0;
 		return 0;
-	} else if (*nb < 0) {
-		dev_err(&client->dev, "Failed to read %s prop\n", prop_name);
-		return *nb;
 	}
 
+	ret = device_property_read_u32_array(dev, prop_name, array, *nb);
+	if (ret) {
+		dev_err(&client->dev, "Failed to read %s prop\n", prop_name);
+		return ret;
+	}
 	for (i = 0; i < *nb;  i++) {
 		if (array[i] >= VD55G1_NB_GPIOS) {
 			dev_err(&client->dev, "Invalid GPIO number %d\n",
@@ -2373,7 +2379,7 @@ static int vd55g1_parse_dt_gpios_array(struct vd55g1 *sensor,
 static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 {
 	struct i2c_client *client = sensor->i2c_client;
-	struct device_node *np = client->dev.of_node;
+	struct device *dev = &client->dev;
 	u32 led_gpios[VD55G1_NB_GPIOS];
 	int nb_gpios_leds;
 	u32 out_sync_gpios[VD55G1_NB_GPIOS];
@@ -2414,7 +2420,7 @@ static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 	}
 
 	/* Take into account optional 'st,in-sync' input for GPIO0 */
-	ret = of_property_read_u32(np, "st,in-sync", &in_sync_gpio);
+	ret = device_property_read_u32(dev, "st,in-sync", &in_sync_gpio);
 	if (ret < 0 && ret != -EINVAL) {
 		dev_err(&client->dev, "Failed to read st,in-sync prop\n");
 		return ret;
