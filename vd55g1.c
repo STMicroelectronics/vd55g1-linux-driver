@@ -669,7 +669,7 @@ static inline struct vd55g1 *to_vd55g1(struct v4l2_subdev *sd)
 static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
 {
 	return &container_of_const(ctrl->handler, struct vd55g1,
-		ctrl_handler)->sd;
+				   ctrl_handler)->sd;
 }
 
 static u8 get_bpp_by_code(struct vd55g1 *sensor, u32 code)
