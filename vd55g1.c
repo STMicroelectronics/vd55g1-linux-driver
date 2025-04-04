@@ -780,9 +780,9 @@ static unsigned int get_hblank_min(struct vd55g1 *sensor)
 	return get_min_line_length(sensor) - crop->width;
 }
 
-static struct vblank_limits get_vblank_limits(struct vd55g1 *sensor)
+static void get_vblank_limits(struct vd55g1 *sensor,
+			      struct vblank_limits *limits)
 {
-	struct vblank_limits limits;
 #if KERNEL_LACKS_ACTIVE_STATES
 	const struct v4l2_rect *crop = &sensor->active_crop;
 #elif KERNEL_LACKS_NEW_STATES_API
@@ -796,11 +796,9 @@ static struct vblank_limits get_vblank_limits(struct vd55g1 *sensor)
 	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
 #endif
 
-	limits.min = VD55G1_VBLANK_MIN;
-	limits.def = VD55G1_FRAME_LENGTH_DEF - crop->height;
-	limits.max = VD55G1_VBLANK_MAX - crop->height;
-
-	return limits;
+	limits->min = VD55G1_VBLANK_MIN;
+	limits->def = VD55G1_FRAME_LENGTH_DEF - crop->height;
+	limits->max = VD55G1_VBLANK_MAX - crop->height;
 }
 
 #if KERNEL_LACKS_CCI
@@ -1630,7 +1628,7 @@ static int vd55g1_new_format_change_controls(struct vd55g1 *sensor)
 	int ret;
 
 	/* Reset vblank and frame length to default */
-	vblank = get_vblank_limits(sensor);
+	get_vblank_limits(sensor, &vblank);
 	ret = __v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank.min,
 				       vblank.max, 1, vblank.def);
 	if (ret)
@@ -2122,7 +2120,7 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 						hblank, hblank, 1, hblank);
 	if (sensor->hblank_ctrl)
 		sensor->hblank_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
-	vblank = get_vblank_limits(sensor);
+	get_vblank_limits(sensor, &vblank);
 	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
 						vblank.min, vblank.max,
 						1, vblank.def);
