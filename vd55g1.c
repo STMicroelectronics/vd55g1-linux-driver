@@ -1146,10 +1146,9 @@ static int vd55g1_update_frame_length(struct vd55g1 *sensor,
 {
 	int ret = 0;
 
-	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB) {
+	if (sensor->hdr_ctrl->val == VD55G1_HDR_SUB)
 		vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(1), frame_length,
 			     &ret);
-	}
 	vd55g1_write(sensor, VD55G1_REG_FRAME_LENGTH(0), frame_length, &ret);
 
 	return ret;
