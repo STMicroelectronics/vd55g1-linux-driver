@@ -891,7 +891,7 @@ out:
 	cci_read((sensor)->regmap, reg, val, err)
 
 #define vd55g1_write(sensor, reg, val, err) \
-	cci_write((sensor)->regmap, reg, (u64)val, err)
+	cci_write((sensor)->regmap, reg, val, err)
 #endif
 
 static int vd55g1_write_array(struct vd55g1 *sensor, u32 reg, unsigned int len,
@@ -951,7 +951,7 @@ static int vd55g1_wait_state(struct vd55g1 *sensor, int state, int *err)
 
 static int vd55g1_get_regulators(struct vd55g1 *sensor)
 {
-	int i;
+	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(vd55g1_supply_name); i++)
 		sensor->supplies[i].supply = vd55g1_supply_name[i];
