@@ -1748,7 +1748,9 @@ static int vd55g1_init_state(struct v4l2_subdev *sd,
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct v4l2_subdev_format fmt = { 0 };
 #if !KERNEL_LACKS_STREAMS_API
-	struct v4l2_subdev_route routes[] = { 0 };
+	struct v4l2_subdev_route routes[] = {
+		{ .flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE }
+	};
 	struct v4l2_subdev_krouting routing = {
 	    .num_routes = ARRAY_SIZE(routes),
 	    .routes = routes,
@@ -1756,7 +1758,6 @@ static int vd55g1_init_state(struct v4l2_subdev *sd,
 	int ret;
 
 	/* Needed by v4l2_subdev_s_stream_helper(), even with 1 stream only */
-	routes[0].flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE;
 	ret = v4l2_subdev_set_routing(sd, sd_state, &routing);
 	if (ret)
 		return ret;
