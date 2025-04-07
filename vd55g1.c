@@ -1391,7 +1391,7 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
-	int ret = 0;
+	int ret;
 
 #if (KERNEL_VERSION(5, 9, 0) > LINUX_VERSION_CODE)
 	ret = __pm_runtime_resume(&client->dev, RPM_GET_PUT);
@@ -2283,7 +2283,7 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2_DPHY };
 #endif
 	u8 n_lanes;
-	int ret = 0;
+	int ret;
 
 #if KERNEL_LACKS_NEW_EP_ALLOC
 	struct v4l2_fwnode_endpoint *ep_ptr =
