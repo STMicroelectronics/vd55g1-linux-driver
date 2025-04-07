@@ -13,6 +13,8 @@ pipeline {
 	stages {
 		stage('Prepare') {
 			steps {
+				/* Increase apt lock file timeout not to fail directly if another job is running apt too */
+				sh 'echo "DPkg::Lock::Timeout \"60\";" | sudo tee -a /etc/apt/apt.conf.d/99timeout'
 				/*
 				 * Checkout in a subfolder, as debian packaging
 				 * tools require to output on '..'.
