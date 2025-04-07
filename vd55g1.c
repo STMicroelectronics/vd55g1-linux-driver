@@ -967,7 +967,6 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 	/* Double data rate */
 	u32 mipi_freq = sensor->link_freq * 2;
 	u32 sys_clk, mipi_div, pixel_div;
-	int ret = 0;
 
 	if (sensor->xclk_freq < 6 * HZ_PER_MHZ ||
 	    sensor->xclk_freq > 27 * HZ_PER_MHZ) {
@@ -1005,7 +1004,7 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 	/* Frequency to data rate is 1:1 ratio for MIPI */
 	sensor->data_rate_in_mbps = mipi_freq;
 
-	return ret;
+	return 0;
 }
 
 static int vd55g1_update_patgen(struct vd55g1 *sensor, u32 patgen_index)
@@ -1449,11 +1448,11 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 	vd55g1_lock_ctrls(sensor, true);
 	sensor->streaming = true;
 
-	return ret;
+	return 0;
 
 err_rpm_put:
 	pm_runtime_put(&client->dev);
-	return ret;
+	return 0;
 }
 
 #if KERNEL_LACKS_STREAMS_API
@@ -2525,7 +2524,7 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 		goto err_media;
 	}
 
-	return ret;
+	return 0;
 
 #if !KERNEL_LACKS_ACTIVE_STATES
 err_ctrls:
