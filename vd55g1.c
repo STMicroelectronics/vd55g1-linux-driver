@@ -2492,7 +2492,7 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
 	if (ret) {
-		dev_err(&client->dev, "Failed to init media entity : %d\n",
+		dev_err(&client->dev, "Failed to init media entity: %d\n",
 			ret);
 		return ret;
 	}
@@ -2623,7 +2623,7 @@ static int vd55g1_probe(struct i2c_client *client)
 
 	ret = vd55g1_subdev_init(sensor);
 	if (ret) {
-		dev_err(dev, "V4l2 init failed : %d\n", ret);
+		dev_err(dev, "V4l2 init failed: %d\n", ret);
 		goto err_power_off;
 	}
 
