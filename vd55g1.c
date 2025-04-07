@@ -682,7 +682,7 @@ static u8 get_bpp_by_code(struct vd55g1 *sensor, u32 code)
 			return vd55g1_mbus_codes[i].bpp;
 	}
 	/* Should never happen */
-	dev_warn(&client->dev, "Unsupported code %d. default to 8 bpp", code);
+	dev_warn(&client->dev, "Unsupported code %d. default to 8 bpp\n", code);
 	return 8;
 }
 
@@ -696,7 +696,7 @@ static u8 get_data_type_by_code(struct vd55g1 *sensor, u32 code)
 			return vd55g1_mbus_codes[i].data_type;
 	}
 	/* Should never happen */
-	dev_warn(&client->dev, "Unsupported code %d. default to MIPI_CSI2_DT_RAW8 data type",
+	dev_warn(&client->dev, "Unsupported code %d. default to MIPI_CSI2_DT_RAW8 data type\n",
 		 code);
 	return MIPI_CSI2_DT_RAW8;
 }
@@ -1476,7 +1476,7 @@ static int vd55g1_disable_streams(struct v4l2_subdev *sd,
 	vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY, &ret);
 
 	if (ret)
-		dev_warn(&client->dev, "Can't disable stream");
+		dev_warn(&client->dev, "Can't disable stream\n");
 
 	vd55g1_lock_ctrls(sensor, false);
 	sensor->streaming = false;
@@ -1498,20 +1498,20 @@ static int vd55g1_patch(struct vd55g1 *sensor)
 	vd55g1_write(sensor, VD55G1_REG_BOOT, VD55G1_BOOT_PATCH_SETUP, &ret);
 	vd55g1_poll_reg(sensor, VD55G1_REG_BOOT, 0, &ret);
 	if (ret) {
-		dev_err(&client->dev, "Failed to apply patch");
+		dev_err(&client->dev, "Failed to apply patch\n");
 		return ret;
 	}
 
 	vd55g1_read(sensor, VD55G1_REG_FWPATCH_REVISION, &patch, &ret);
 	if (patch != (VD55G1_FWPATCH_REVISION_MAJOR << 8) +
 	    VD55G1_FWPATCH_REVISION_MINOR) {
-		dev_err(&client->dev, "Bad patch version expected %d.%d got %d.%d",
+		dev_err(&client->dev, "Bad patch version expected %d.%d got %d.%d\n",
 			VD55G1_FWPATCH_REVISION_MAJOR,
 			VD55G1_FWPATCH_REVISION_MINOR,
 			(u8)(patch >> 8), (u8)(patch & 0xff));
 		return -ENODEV;
 	}
-	dev_dbg(&client->dev, "patch %d.%d applied",
+	dev_dbg(&client->dev, "patch %d.%d applied\n",
 		(u8)(patch >> 8), (u8)(patch & 0xff));
 
 	return 0;
@@ -2197,7 +2197,7 @@ static int vd55g1_detect(struct vd55g1 *sensor)
 		return ret;
 
 	if (id != VD55G1_MODEL_ID) {
-		dev_warn(&client->dev, "Unsupported sensor id %x", (u32)id);
+		dev_warn(&client->dev, "Unsupported sensor id %x\n", (u32)id);
 		return -ENODEV;
 	}
 
@@ -2213,13 +2213,13 @@ static int vd55g1_power_on(struct device *dev)
 	ret = regulator_bulk_enable(ARRAY_SIZE(vd55g1_supply_name),
 				    sensor->supplies);
 	if (ret) {
-		dev_err(dev, "Failed to enable regulators %d", ret);
+		dev_err(dev, "Failed to enable regulators %d\n", ret);
 		return ret;
 	}
 
 	ret = clk_prepare_enable(sensor->xclk);
 	if (ret) {
-		dev_err(dev, "Failed to enable clock %d", ret);
+		dev_err(dev, "Failed to enable clock %d\n", ret);
 		goto disable_bulk;
 	}
 
@@ -2233,19 +2233,19 @@ static int vd55g1_power_on(struct device *dev)
 
 	ret = vd55g1_detect(sensor);
 	if (ret) {
-		dev_err(dev, "Sensor detect failed %d", ret);
+		dev_err(dev, "Sensor detect failed %d\n", ret);
 		goto disable_clock;
 	}
 
 	ret = vd55g1_patch(sensor);
 	if (ret) {
-		dev_err(dev, "Sensor patch failed %d", ret);
+		dev_err(dev, "Sensor patch failed %d\n", ret);
 		goto disable_clock;
 	}
 
 	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY, NULL);
 	if (ret) {
-		dev_err(dev, "Sensor waiting after patch failed %d",
+		dev_err(dev, "Sensor waiting after patch failed %d\n",
 			ret);
 		goto disable_clock;
 	}
@@ -2492,7 +2492,8 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
 	if (ret) {
-		dev_err(&client->dev, "Failed to init media entity : %d", ret);
+		dev_err(&client->dev, "Failed to init media entity : %d\n",
+			ret);
 		return ret;
 	}
 
@@ -2509,7 +2510,7 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	sensor->sd.state_lock = sensor->ctrl_handler.lock;
 	ret = v4l2_subdev_init_finalize(&sensor->sd);
 	if (ret) {
-		dev_err(&client->dev, "Subdev init error: %d", ret);
+		dev_err(&client->dev, "Subdev init error: %d\n", ret);
 		goto err_ctrls;
 	}
 #endif
@@ -2520,7 +2521,8 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	 */
 	ret = vd55g1_init_ctrls(sensor);
 	if (ret) {
-		dev_err(&client->dev, "Controls initialization failed %d", ret);
+		dev_err(&client->dev, "Controls initialization failed %d\n",
+			ret);
 		goto err_media;
 	}
 
@@ -2551,7 +2553,7 @@ static void vd55g1_subdev_cleanup(struct vd55g1 *sensor)
 static int vd55g1_err_probe(struct device *dev, int ret, char *msg)
 {
 #if KERNEL_LACKS_DEV_ERR_PROBE
-	dev_err(dev, "%s", msg);
+	dev_err(dev, "%s\n", msg);
 	return ret;
 #else
 	return dev_err_probe(dev, ret, msg);
@@ -2574,17 +2576,17 @@ static int vd55g1_probe(struct i2c_client *client)
 	ret = vd55g1_parse_dt(sensor);
 	if (ret)
 		return vd55g1_err_probe(dev, ret,
-					"Failed to parse Device Tree");
+					"Failed to parse Device Tree\n");
 
 	/* Get (and check) resources : power regs, ext clock, reset gpio */
 	ret = vd55g1_get_regulators(sensor);
 	if (ret)
-		return vd55g1_err_probe(dev, ret, "Failed to get regulators");
+		return vd55g1_err_probe(dev, ret, "Failed to get regulators\n");
 
 	sensor->xclk = devm_clk_get(dev, NULL);
 	if (IS_ERR(sensor->xclk))
 		return vd55g1_err_probe(dev, PTR_ERR(sensor->xclk),
-					"Failed to get xclk");
+					"Failed to get xclk\n");
 
 	sensor->xclk_freq = clk_get_rate(sensor->xclk);
 	ret = vd55g1_prepare_clock_tree(sensor);
@@ -2595,7 +2597,7 @@ static int vd55g1_probe(struct i2c_client *client)
 						     GPIOD_OUT_HIGH);
 	if (IS_ERR(sensor->reset_gpio))
 		return vd55g1_err_probe(dev, PTR_ERR(sensor->reset_gpio),
-					"Failed to get reset gpio");
+					"Failed to get reset gpio\n");
 
 #if KERNEL_LACKS_CCI
 	sensor->regmap = devm_regmap_init_i2c(client, &vd55g1_regmap_config);
@@ -2604,7 +2606,7 @@ static int vd55g1_probe(struct i2c_client *client)
 #endif
 	if (IS_ERR(sensor->regmap))
 		return vd55g1_err_probe(dev, PTR_ERR(sensor->regmap),
-					"Failed to init regmap");
+					"Failed to init regmap\n");
 
 	/* Detect if sensor is present and if its revision is supported */
 	ret = vd55g1_power_on(dev);
@@ -2621,13 +2623,13 @@ static int vd55g1_probe(struct i2c_client *client)
 
 	ret = vd55g1_subdev_init(sensor);
 	if (ret) {
-		dev_err(dev, "V4l2 init failed : %d", ret);
+		dev_err(dev, "V4l2 init failed : %d\n", ret);
 		goto err_power_off;
 	}
 
 	ret = v4l2_async_register_subdev(&sensor->sd);
 	if (ret) {
-		dev_err(dev, "async subdev register failed %d", ret);
+		dev_err(dev, "async subdev register failed %d\n", ret);
 		goto err_subdev;
 	}
 
