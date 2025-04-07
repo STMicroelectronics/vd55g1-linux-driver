@@ -2516,7 +2516,7 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 #endif
 
 	/*
-	 * Initiliaze controls after v4l2_subdev_init_finalize() to make sure
+	 * Initialize controls after v4l2_subdev_init_finalize() to make sure
 	 * default values are set.
 	 */
 	ret = vd55g1_init_ctrls(sensor);
