@@ -507,8 +507,8 @@ static const u8 patch_array[] = {
 
 static const char * const vd55g1_tp_menu[] = {
 	"Disabled",
-	"Dgrey",
-	"PN28",
+	"Diagonal Grey Scale",
+	"Pseudo-random Noise",
 };
 
 static const s64 vd55g1_ev_bias_menu[] = {
