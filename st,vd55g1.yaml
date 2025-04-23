@@ -15,6 +15,7 @@ description: |-
  The STMicroelectronics VD55G1 is a global shutter image sensor with an active
  array size of 804H x 704V. It is programmable through I2C interface. The I2C
  address is fixed to 0x10.
+
  Image data is sent through MIPI CSI-2, which is configured as only 1 data
  lane. The sensor provides 4 GPIOS that can be used for external LED signal
  (synchronized with sensor integration periods).
