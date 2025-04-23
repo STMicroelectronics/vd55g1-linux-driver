@@ -132,6 +132,8 @@
 #define VD55G1_REG_AE_FORCE_COLDSTART			CCI_REG8(0x0308)
 #define VD55G1_REG_AE_COLDSTART_EXP_TIME		CCI_REG32_LE(0x0374)
 #define VD55G1_REG_READOUT_CTRL				CCI_REG8(0x052e)
+#define VD55G1_READOUT_CTRL_BIN_MODE_NORMAL		0
+#define VD55G1_READOUT_CTRL_BIN_MODE_DIGITAL_X2		1
 #define VD55G1_REG_DUSTER_CTRL				CCI_REG8(0x03ea)
 #define VD55G1_DUSTER_ENABLE				BIT(0)
 #define VD55G1_DUSTER_DISABLE				0
@@ -163,6 +165,10 @@
 	CCI_REG16_LE(0x0512 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_GPIO_0_CTRL(ctx) \
 	CCI_REG8(0x051d + VD55G1_CTX_OFFSET * (ctx))
+#define VD55G1_GPIO_MODE_FSYNC_OUT			0x00
+#define VD55G1_GPIO_MODE_IN				0x01
+#define VD55G1_GPIO_MODE_STROBE				0x02
+#define VD55G1_GPIO_MODE_VTSLAVE			0x0a
 #define VD55G1_REG_DARKCAL_PEDESTAL(ctx) \
 	CCI_REG16_LE(0x0526 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_VT_MODE(ctx) \
@@ -532,19 +538,6 @@ enum vd55g1_hdr_mode {
 	VD55G1_HDR_SUB,
 };
 
-enum vd55g1_bin_mode {
-	VD55G1_BIN_MODE_NORMAL,
-	VD55G1_BIN_MODE_DIGITAL_X2,
-	VD55G1_BIN_MODE_DIGITAL_X4,
-};
-
-enum vd55g1_gpio_mode {
-	VD55G1_GPIO_MODE_FSYNC_OUT = 0x00,
-	VD55G1_GPIO_MODE_IN = 0x01,
-	VD55G1_GPIO_MODE_STROBE = 0x02,
-	VD55G1_GPIO_MODE_VTSLAVE = 0x0a,
-};
-
 struct vd55g1_mode {
 	u32 width;
 	u32 height;
@@ -625,7 +618,7 @@ struct vd55g1 {
 	struct regmap *regmap;
 	u32 xclk_freq;
 	u16 oif_ctrl;
-	enum vd55g1_gpio_mode gpios[VD55G1_NB_GPIOS];
+	u8 gpios[VD55G1_NB_GPIOS];
 	bool ext_vt_sync;
 	unsigned long ext_leds_mask;
 	int data_rate_in_mbps;
@@ -1285,7 +1278,7 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 	const struct v4l2_mbus_framefmt *format =
 		v4l2_subdev_state_get_format(state, 0);
 #endif
-	enum vd55g1_bin_mode binning;
+	u8 binning;
 	int ret = 0;
 
 	vd55g1_write(sensor, VD55G1_REG_FORMAT_CTRL,
@@ -1296,10 +1289,10 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 	switch (crop->width / format->width) {
 	case 1:
 	default:
-		binning = VD55G1_BIN_MODE_NORMAL;
+		binning = VD55G1_READOUT_CTRL_BIN_MODE_NORMAL;
 		break;
 	case 2:
-		binning = VD55G1_BIN_MODE_DIGITAL_X2;
+		binning = VD55G1_READOUT_CTRL_BIN_MODE_DIGITAL_X2;
 		break;
 	}
 	vd55g1_write(sensor, VD55G1_REG_READOUT_CTRL, binning, &ret);
@@ -1320,7 +1313,7 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 static int vd55g1_update_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
 {
 	unsigned long io;
-	u32 gpio_val;
+	u8 gpio_val;
 	int ret = 0;
 
 	for_each_set_bit(io, &gpio_mask, VD55G1_NB_GPIOS) {
