@@ -668,31 +668,20 @@ static inline struct vd55g1 *ctrl_to_vd55g1(struct v4l2_ctrl *ctrl)
 	return to_vd55g1(sd);
 }
 
-static u8 get_bpp_by_code(struct vd55g1 *sensor, u32 code)
+static const struct vd55g1_fmt_desc *vd55g1_get_fmt_desc(struct vd55g1 *sensor,
+							 u32 code)
 {
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(vd55g1_mbus_codes); i++) {
 		if (vd55g1_mbus_codes[i].code == code)
-			return vd55g1_mbus_codes[i].bpp;
+			return &vd55g1_mbus_codes[i];
 	}
+
 	/* Should never happen */
 	dev_warn(sensor->dev, "Unsupported code %d. default to 8 bpp\n", code);
-	return 8;
-}
 
-static u8 get_data_type_by_code(struct vd55g1 *sensor, u32 code)
-{
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(vd55g1_mbus_codes); i++) {
-		if (vd55g1_mbus_codes[i].code == code)
-			return vd55g1_mbus_codes[i].data_type;
-	}
-	/* Should never happen */
-	dev_warn(sensor->dev, "Unsupported code %d. default to MIPI_CSI2_DT_RAW8 data type\n",
-		 code);
-	return MIPI_CSI2_DT_RAW8;
+	return &vd55g1_mbus_codes[0];
 }
 
 static s32 get_pixel_rate(struct vd55g1 *sensor)
@@ -712,7 +701,7 @@ static s32 get_pixel_rate(struct vd55g1 *sensor)
 #endif
 
 	return div64_u64((u64)sensor->data_rate_in_mbps,
-			 get_bpp_by_code(sensor, format->code));
+			 vd55g1_get_fmt_desc(sensor, format->code)->bpp);
 }
 
 static s32 get_min_line_length(struct vd55g1 *sensor)
@@ -741,7 +730,7 @@ static s32 get_min_line_length(struct vd55g1 *sensor)
 
 	/* MIPI required time */
 	mipi_req_line_time = (crop->width *
-			      get_bpp_by_code(sensor, format->code) +
+			      vd55g1_get_fmt_desc(sensor, format->code)->bpp +
 			      VD55G1_MIPI_MARGIN) /
 			      (sensor->data_rate_in_mbps / MEGA);
 	mipi_req_line_length = mipi_req_line_time * sensor->pixel_clock /
@@ -1280,9 +1269,10 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 	int ret = 0;
 
 	vd55g1_write(sensor, VD55G1_REG_FORMAT_CTRL,
-		     get_bpp_by_code(sensor, format->code), &ret);
+		     vd55g1_get_fmt_desc(sensor, format->code)->bpp, &ret);
 	vd55g1_write(sensor, VD55G1_REG_OIF_IMG_CTRL,
-		     get_data_type_by_code(sensor, format->code), &ret);
+		     vd55g1_get_fmt_desc(sensor, format->code)->data_type,
+		     &ret);
 
 	switch (crop->width / format->width) {
 	case 1:
