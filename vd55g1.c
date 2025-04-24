@@ -1025,10 +1025,9 @@ static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
 		vd55g1_write(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
 			     sensor->again_ctrl->val, &ret);
 
-	if (!is_auto && sensor->dgain_ctrl->is_new) {
+	if (!is_auto && sensor->dgain_ctrl->is_new)
 		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
 			     sensor->dgain_ctrl->val, &ret);
-	}
 
 	return ret;
 }
