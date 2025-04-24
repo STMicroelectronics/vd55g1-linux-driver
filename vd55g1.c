@@ -1373,7 +1373,7 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 
 	vd55g1_write(sensor, VD55G1_REG_EXT_CLOCK, sensor->xclk_freq, &ret);
 
-	/* configure output */
+	/* Configure output */
 	vd55g1_write(sensor, VD55G1_REG_MIPI_DATA_RATE,
 		     sensor->data_rate_in_mbps, &ret);
 	vd55g1_write(sensor, VD55G1_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
