@@ -201,6 +201,10 @@
 #define VD55G1_CTX_OFFSET				0x50
 #define VD55G1_FWPATCH_REVISION_MAJOR			2
 #define VD55G1_FWPATCH_REVISION_MINOR			9
+#define VD55G1_XCLK_FREQ_MIN				(6 * HZ_PER_MHZ)
+#define VD55G1_XCLK_FREQ_MAX				(27 * HZ_PER_MHZ)
+#define VD55G1_MIPI_FREQ_MIN				(250 * HZ_PER_MHZ)
+#define VD55G1_MIPI_FREQ_MAX				(1200 * HZ_PER_MHZ)
 
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
@@ -936,18 +940,22 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 	u32 mipi_freq = sensor->link_freq * 2;
 	u32 sys_clk, mipi_div, pixel_div;
 
-	if (sensor->xclk_freq < 6 * HZ_PER_MHZ ||
-	    sensor->xclk_freq > 27 * HZ_PER_MHZ) {
+	if (sensor->xclk_freq < VD55G1_XCLK_FREQ_MIN ||
+	    sensor->xclk_freq > VD55G1_XCLK_FREQ_MAX) {
 		dev_err(sensor->dev,
-			"Only 6Mhz-27Mhz clock range supported. Provided %lu MHz\n",
+			"Only %luMhz-%luMhz clock range supported. Provided %lu MHz\n",
+			VD55G1_XCLK_FREQ_MIN / HZ_PER_MHZ,
+			VD55G1_XCLK_FREQ_MAX / HZ_PER_MHZ,
 			sensor->xclk_freq / HZ_PER_MHZ);
 		return -EINVAL;
 	}
 
-	if (mipi_freq < 250 * HZ_PER_MHZ ||
-	    mipi_freq > 1200 * HZ_PER_MHZ) {
+	if (mipi_freq < VD55G1_MIPI_FREQ_MIN ||
+	    mipi_freq > VD55G1_MIPI_FREQ_MAX) {
 		dev_err(sensor->dev,
-			"Only 250Mhz-1200Mhz link frequency range supported. Provided %lu MHz\n",
+			"Only %luMhz-%luMhz link frequency range supported. Provided %lu MHz\n",
+			VD55G1_MIPI_FREQ_MIN / HZ_PER_MHZ,
+			VD55G1_MIPI_FREQ_MAX / HZ_PER_MHZ,
 			mipi_freq / HZ_PER_MHZ);
 		return -EINVAL;
 	}
