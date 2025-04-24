@@ -621,7 +621,7 @@ struct vd55g1 {
 	u8 gpios[VD55G1_NB_GPIOS];
 	bool ext_vt_sync;
 	unsigned long ext_leds_mask;
-	int data_rate_in_mbps;
+	u32 data_rate_in_mbps;
 	u32 pixel_clock;
 	u64 link_freq;
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -700,8 +700,8 @@ static s32 vd55g1_get_pixel_rate(struct vd55g1 *sensor)
 		v4l2_subdev_state_get_format(state, 0);
 #endif
 
-	return div64_u64((u64)sensor->data_rate_in_mbps,
-			 vd55g1_get_fmt_desc(sensor, format->code)->bpp);
+	return sensor->data_rate_in_mbps /
+			vd55g1_get_fmt_desc(sensor, format->code)->bpp;
 }
 
 static s32 vd55g1_get_min_line_length(struct vd55g1 *sensor)
