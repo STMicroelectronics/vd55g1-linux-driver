@@ -1344,7 +1344,6 @@ static void vd55g1_grab_ctrls(struct vd55g1 *sensor, bool enable)
 	v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
 	v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
 	v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
-	v4l2_ctrl_grab(sensor->hblank_ctrl, enable);
 	if (sensor->ext_vt_sync)
 		v4l2_ctrl_grab(sensor->slave_ctrl, enable);
 }
