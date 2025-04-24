@@ -2135,26 +2135,9 @@ free_ctrls:
 #endif
 }
 
-static int vd55g1_check_sensor_revision(struct vd55g1 *sensor)
-{
-	u64 device_rev;
-	int ret;
-
-	ret = vd55g1_read(sensor, VD55G1_REG_REVISION, &device_rev, NULL);
-	if (ret)
-		return ret;
-
-	if (device_rev != VD55G1_REVISION_CCB) {
-		dev_err(sensor->dev, "Unsupported sensor revision (0x%x)\n",
-			(u16)device_rev);
-		return -ENODEV;
-	}
-
-	return 0;
-}
-
 static int vd55g1_detect(struct vd55g1 *sensor)
 {
+	u64 device_rev;
 	u64 id;
 	int ret;
 
@@ -2167,7 +2150,17 @@ static int vd55g1_detect(struct vd55g1 *sensor)
 		return -ENODEV;
 	}
 
-	return vd55g1_check_sensor_revision(sensor);
+	ret = vd55g1_read(sensor, VD55G1_REG_REVISION, &device_rev, NULL);
+	if (ret)
+		return ret;
+
+	if (device_rev != VD55G1_REVISION_CCB) {
+		dev_err(sensor->dev, "Unsupported sensor revision (0x%x)\n",
+			(u16)device_rev);
+		return -ENODEV;
+	}
+
+	return 0;
 }
 
 static int vd55g1_power_on(struct device *dev)
