@@ -930,18 +930,6 @@ static int vd55g1_wait_state(struct vd55g1 *sensor, int state, int *err)
 	return vd55g1_poll_reg(sensor, VD55G1_REG_SYSTEM_FSM, state, err);
 }
 
-static int vd55g1_get_regulators(struct vd55g1 *sensor)
-{
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(vd55g1_supply_name); i++)
-		sensor->supplies[i].supply = vd55g1_supply_name[i];
-
-	return devm_regulator_bulk_get(sensor->dev,
-				       ARRAY_SIZE(vd55g1_supply_name),
-				       sensor->supplies);
-}
-
 static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 {
 	/* Double data rate */
@@ -2515,6 +2503,18 @@ static void vd55g1_subdev_cleanup(struct vd55g1 *sensor)
 #endif
 	media_entity_cleanup(&sensor->sd.entity);
 	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
+}
+
+static int vd55g1_get_regulators(struct vd55g1 *sensor)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(vd55g1_supply_name); i++)
+		sensor->supplies[i].supply = vd55g1_supply_name[i];
+
+	return devm_regulator_bulk_get(sensor->dev,
+				       ARRAY_SIZE(vd55g1_supply_name),
+				       sensor->supplies);
 }
 
 static int vd55g1_err_probe(struct device *dev, int ret, char *msg)
