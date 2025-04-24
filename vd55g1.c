@@ -1337,7 +1337,7 @@ static int vd55g1_ro_ctrls_setup(struct vd55g1 *sensor)
 			    crop->width + sensor->hblank_ctrl->val, NULL);
 }
 
-static void vd55g1_lock_ctrls(struct vd55g1 *sensor, bool enable)
+static void vd55g1_grab_ctrls(struct vd55g1 *sensor, bool enable)
 {
 	/* These settings cannot change during stream */
 	v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
@@ -1412,7 +1412,7 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 	if (ret)
 		goto err_rpm_put;
 
-	vd55g1_lock_ctrls(sensor, true);
+	vd55g1_grab_ctrls(sensor, true);
 	sensor->streaming = true;
 
 	return 0;
@@ -1444,7 +1444,7 @@ static int vd55g1_disable_streams(struct v4l2_subdev *sd,
 	if (ret)
 		dev_warn(sensor->dev, "Can't disable stream\n");
 
-	vd55g1_lock_ctrls(sensor, false);
+	vd55g1_grab_ctrls(sensor, false);
 	sensor->streaming = false;
 
 	pm_runtime_mark_last_busy(sensor->dev);
