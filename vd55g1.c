@@ -203,8 +203,8 @@
 #define VD55G1_FWPATCH_REVISION_MINOR			9
 #define VD55G1_XCLK_FREQ_MIN				(6 * HZ_PER_MHZ)
 #define VD55G1_XCLK_FREQ_MAX				(27 * HZ_PER_MHZ)
-#define VD55G1_MIPI_FREQ_MIN				(250 * HZ_PER_MHZ)
-#define VD55G1_MIPI_FREQ_MAX				(1200 * HZ_PER_MHZ)
+#define VD55G1_MIPI_RATE_MIN				(250 * HZ_PER_MHZ)
+#define VD55G1_MIPI_RATE_MAX				(1200 * HZ_PER_MHZ)
 
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
@@ -625,7 +625,7 @@ struct vd55g1 {
 	u8 gpios[VD55G1_NB_GPIOS];
 	bool ext_vt_sync;
 	unsigned long ext_leds_mask;
-	u32 data_rate_in_mbps;
+	u32 mipi_rate;
 	u32 pixel_clock;
 	u64 link_freq;
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -704,7 +704,7 @@ static s32 vd55g1_get_pixel_rate(struct vd55g1 *sensor)
 		v4l2_subdev_state_get_format(state, 0);
 #endif
 
-	return sensor->data_rate_in_mbps /
+	return sensor->mipi_rate /
 			vd55g1_get_fmt_desc(sensor, format->code)->bpp;
 }
 
@@ -736,7 +736,7 @@ static s32 vd55g1_get_min_line_length(struct vd55g1 *sensor)
 	mipi_req_line_time = (crop->width *
 			      vd55g1_get_fmt_desc(sensor, format->code)->bpp +
 			      VD55G1_MIPI_MARGIN) /
-			      (sensor->data_rate_in_mbps / MEGA);
+			      (sensor->mipi_rate / MEGA);
 	mipi_req_line_length = mipi_req_line_time * sensor->pixel_clock /
 			       HZ_PER_MHZ;
 
@@ -936,8 +936,6 @@ static int vd55g1_wait_state(struct vd55g1 *sensor, int state, int *err)
 
 static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 {
-	/* Double data rate */
-	u32 mipi_freq = sensor->link_freq * 2;
 	u32 sys_clk, mipi_div, pixel_div;
 
 	if (sensor->xclk_freq < VD55G1_XCLK_FREQ_MIN ||
@@ -950,24 +948,27 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 		return -EINVAL;
 	}
 
-	if (mipi_freq < VD55G1_MIPI_FREQ_MIN ||
-	    mipi_freq > VD55G1_MIPI_FREQ_MAX) {
+	/* MIPI bus is double data rate */
+	sensor->mipi_rate = sensor->link_freq * 2;
+
+	if (sensor->mipi_rate < VD55G1_MIPI_RATE_MIN ||
+	    sensor->mipi_rate > VD55G1_MIPI_RATE_MAX) {
 		dev_err(sensor->dev,
-			"Only %luMhz-%luMhz link frequency range supported. Provided %lu MHz\n",
-			VD55G1_MIPI_FREQ_MIN / HZ_PER_MHZ,
-			VD55G1_MIPI_FREQ_MAX / HZ_PER_MHZ,
-			mipi_freq / HZ_PER_MHZ);
+			"Only %luMbps-%luMbps data rate range supported. Provided %lu Mbps\n",
+			VD55G1_MIPI_RATE_MIN / MEGA,
+			VD55G1_MIPI_RATE_MAX / MEGA,
+			sensor->mipi_rate / MEGA);
 		return -EINVAL;
 	}
 
-	if (mipi_freq <= 300 * HZ_PER_MHZ)
+	if (sensor->mipi_rate <= 300 * MEGA)
 		mipi_div = 4;
-	else if (mipi_freq <= 600 * HZ_PER_MHZ)
+	else if (sensor->mipi_rate <= 600 * MEGA)
 		mipi_div = 2;
 	else
 		mipi_div = 1;
 
-	sys_clk = mipi_freq * mipi_div;
+	sys_clk = sensor->mipi_rate * mipi_div;
 
 	if (sys_clk <= 780 * HZ_PER_MHZ)
 		pixel_div = 5;
@@ -977,8 +978,6 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 		pixel_div = 8;
 
 	sensor->pixel_clock = sys_clk / pixel_div;
-	/* Frequency to data rate is 1:1 ratio for MIPI */
-	sensor->data_rate_in_mbps = mipi_freq;
 
 	return 0;
 }
@@ -1383,7 +1382,7 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 
 	/* Configure output */
 	vd55g1_write(sensor, VD55G1_REG_MIPI_DATA_RATE,
-		     sensor->data_rate_in_mbps, &ret);
+		     sensor->mipi_rate, &ret);
 	vd55g1_write(sensor, VD55G1_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
 	vd55g1_write(sensor, VD55G1_REG_ISL_ENABLE, 0, &ret);
 	if (ret)
