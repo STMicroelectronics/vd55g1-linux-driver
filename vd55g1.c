@@ -659,10 +659,13 @@ static inline struct vd55g1 *to_vd55g1(struct v4l2_subdev *sd)
 	return container_of_const(sd, struct vd55g1, sd);
 }
 
-static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
+static inline struct vd55g1 *ctrl_to_vd55g1(struct v4l2_ctrl *ctrl)
 {
-	return &container_of_const(ctrl->handler, struct vd55g1,
-				   ctrl_handler)->sd;
+	struct v4l2_subdev *sd = &container_of_const(ctrl->handler,
+						     struct vd55g1,
+						     ctrl_handler)->sd;
+
+	return to_vd55g1(sd);
 }
 
 static u8 get_bpp_by_code(struct vd55g1 *sensor, u32 code)
@@ -1828,8 +1831,7 @@ static const struct v4l2_subdev_ops vd55g1_subdev_ops = {
 
 static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
-	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
-	struct vd55g1 *sensor = to_vd55g1(sd);
+	struct vd55g1 *sensor = ctrl_to_vd55g1(ctrl);
 	int temperature;
 	int ret = 0;
 
@@ -1860,8 +1862,7 @@ static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 
 static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 {
-	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
-	struct vd55g1 *sensor = to_vd55g1(sd);
+	struct vd55g1 *sensor = ctrl_to_vd55g1(ctrl);
 	unsigned int frame_length = 0;
 	unsigned int expo_max;
 	unsigned int hblank = get_hblank_min(sensor);
