@@ -2226,9 +2226,10 @@ static int vd55g1_power_off(struct device *dev)
 	struct v4l2_subdev *sd = dev_get_drvdata(dev);
 	struct vd55g1 *sensor = to_vd55g1(sd);
 
-	clk_disable_unprepare(sensor->xclk);
 	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
+	clk_disable_unprepare(sensor->xclk);
 	regulator_bulk_disable(ARRAY_SIZE(sensor->supplies), sensor->supplies);
+
 	return 0;
 }
 
