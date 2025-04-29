@@ -2522,6 +2522,7 @@ static int vd55g1_probe(struct i2c_client *client)
 	pm_runtime_set_autosuspend_delay(dev, 4000);
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
 
 	ret = vd55g1_subdev_init(sensor);
 	if (ret) {
@@ -2542,6 +2543,7 @@ err_subdev:
 err_power_off:
 	pm_runtime_disable(dev);
 	pm_runtime_put_noidle(dev);
+	pm_runtime_dont_use_autosuspend(dev);
 	vd55g1_power_off(dev);
 
 	return ret;
