@@ -129,9 +129,11 @@
 #define VD55G1_REG_APPLIED_COARSE_EXPOSURE		CCI_REG16_LE(0x00e8)
 #define VD55G1_REG_APPLIED_ANALOG_GAIN			CCI_REG16_LE(0x00ea)
 #define VD55G1_REG_APPLIED_DIGITAL_GAIN			CCI_REG16_LE(0x00ec)
-#define VD55G1_REG_AE_FORCE_COLDSTART			CCI_REG16_LE(0x0308)
+#define VD55G1_REG_AE_FORCE_COLDSTART			CCI_REG8(0x0308)
 #define VD55G1_REG_AE_COLDSTART_EXP_TIME		CCI_REG32_LE(0x0374)
 #define VD55G1_REG_READOUT_CTRL				CCI_REG8(0x052e)
+#define VD55G1_READOUT_CTRL_BIN_MODE_NORMAL		0
+#define VD55G1_READOUT_CTRL_BIN_MODE_DIGITAL_X2		1
 #define VD55G1_REG_DUSTER_CTRL				CCI_REG8(0x03ea)
 #define VD55G1_DUSTER_ENABLE				BIT(0)
 #define VD55G1_DUSTER_DISABLE				0
@@ -163,16 +165,20 @@
 	CCI_REG16_LE(0x0512 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_GPIO_0_CTRL(ctx) \
 	CCI_REG8(0x051d + VD55G1_CTX_OFFSET * (ctx))
+#define VD55G1_GPIO_MODE_FSYNC_OUT			0x00
+#define VD55G1_GPIO_MODE_IN				0x01
+#define VD55G1_GPIO_MODE_STROBE				0x02
+#define VD55G1_GPIO_MODE_VTSLAVE			0x0a
 #define VD55G1_REG_DARKCAL_PEDESTAL(ctx) \
 	CCI_REG16_LE(0x0526 + VD55G1_CTX_OFFSET * (ctx))
 #define VD55G1_REG_VT_MODE(ctx) \
 	CCI_REG8(0x0536 + VD55G1_CTX_OFFSET * (ctx))
-#define VD55G1_VT_MODE_NORMAL 0
-#define VD55G1_VT_MODE_SUBTRACTION 1
+#define VD55G1_VT_MODE_NORMAL				0
+#define VD55G1_VT_MODE_SUBTRACTION			1
 #define VD55G1_REG_MASK_FRAME_CTRL(ctx) \
 	CCI_REG8(0x0537 + VD55G1_CTX_OFFSET * (ctx))
-#define VD55G1_MASK_FRAME_CTRL_OUTPUT 0
-#define VD55G1_MASK_FRAME_CTRL_MASK 1
+#define VD55G1_MASK_FRAME_CTRL_OUTPUT			0
+#define VD55G1_MASK_FRAME_CTRL_MASK			1
 #define VD55G1_REG_EXPOSURE_INSTANCE(ctx) \
 	CCI_REG32_LE(0x52D + VD55G1_CTX_OFFSET * (ctx))
 
@@ -195,6 +201,10 @@
 #define VD55G1_CTX_OFFSET				0x50
 #define VD55G1_FWPATCH_REVISION_MAJOR			2
 #define VD55G1_FWPATCH_REVISION_MINOR			9
+#define VD55G1_XCLK_FREQ_MIN				(6 * HZ_PER_MHZ)
+#define VD55G1_XCLK_FREQ_MAX				(27 * HZ_PER_MHZ)
+#define VD55G1_MIPI_RATE_MIN				(250 * HZ_PER_MHZ)
+#define VD55G1_MIPI_RATE_MAX				(1200 * HZ_PER_MHZ)
 
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
@@ -501,8 +511,8 @@ static const u8 patch_array[] = {
 
 static const char * const vd55g1_tp_menu[] = {
 	"Disabled",
-	"Dgrey",
-	"PN28",
+	"Diagonal Grey Scale",
+	"Pseudo-random Noise",
 };
 
 static const s64 vd55g1_ev_bias_menu[] = {
@@ -530,19 +540,6 @@ static const char * const vd55g1_supply_name[] = {
 enum vd55g1_hdr_mode {
 	VD55G1_NO_HDR,
 	VD55G1_HDR_SUB,
-};
-
-enum vd55g1_bin_mode {
-	VD55G1_BIN_MODE_NORMAL,
-	VD55G1_BIN_MODE_DIGITAL_X2,
-	VD55G1_BIN_MODE_DIGITAL_X4,
-};
-
-enum vd55g1_gpio_mode {
-	VD55G1_GPIO_MODE_FSYNC_OUT = 0x00,
-	VD55G1_GPIO_MODE_IN = 0x01,
-	VD55G1_GPIO_MODE_STROBE = 0x02,
-	VD55G1_GPIO_MODE_VTSLAVE = 0x0a,
 };
 
 struct vd55g1_mode {
@@ -609,14 +606,14 @@ enum vd55g1_expo_state {
 	VD55G1_EXP_BYPASS,
 };
 
-struct vblank_limits {
+struct vd55g1_vblank_limits {
 	u16 min;
 	u16 def;
 	u16 max;
 };
 
 struct vd55g1 {
-	struct i2c_client *i2c_client;
+	struct device *dev;
 	struct v4l2_subdev sd;
 	struct media_pad pad;
 	struct regulator_bulk_data supplies[ARRAY_SIZE(vd55g1_supply_name)];
@@ -625,10 +622,10 @@ struct vd55g1 {
 	struct regmap *regmap;
 	u32 xclk_freq;
 	u16 oif_ctrl;
-	enum vd55g1_gpio_mode gpios[VD55G1_NB_GPIOS];
+	u8 gpios[VD55G1_NB_GPIOS];
 	bool ext_vt_sync;
 	unsigned long ext_leds_mask;
-	int data_rate_in_mbps;
+	u32 mipi_rate;
 	u32 pixel_clock;
 	u64 link_freq;
 	struct v4l2_ctrl_handler ctrl_handler;
@@ -666,90 +663,51 @@ static inline struct vd55g1 *to_vd55g1(struct v4l2_subdev *sd)
 	return container_of_const(sd, struct vd55g1, sd);
 }
 
-static inline struct v4l2_subdev *ctrl_to_sd(struct v4l2_ctrl *ctrl)
+static inline struct vd55g1 *ctrl_to_vd55g1(struct v4l2_ctrl *ctrl)
 {
-	return &container_of_const(ctrl->handler, struct vd55g1,
-				   ctrl_handler)->sd;
+	struct v4l2_subdev *sd = &container_of_const(ctrl->handler,
+						     struct vd55g1,
+						     ctrl_handler)->sd;
+
+	return to_vd55g1(sd);
 }
 
-static u8 get_bpp_by_code(struct vd55g1 *sensor, u32 code)
+static const struct vd55g1_fmt_desc *vd55g1_get_fmt_desc(struct vd55g1 *sensor,
+							 u32 code)
 {
-	struct i2c_client *client = sensor->i2c_client;
 	unsigned int i;
 
 	for (i = 0; i < ARRAY_SIZE(vd55g1_mbus_codes); i++) {
 		if (vd55g1_mbus_codes[i].code == code)
-			return vd55g1_mbus_codes[i].bpp;
+			return &vd55g1_mbus_codes[i];
 	}
+
 	/* Should never happen */
-	dev_warn(&client->dev, "Unsupported code %d. default to 8 bpp", code);
-	return 8;
+	dev_warn(sensor->dev, "Unsupported code %d. default to 8 bpp\n", code);
+
+	return &vd55g1_mbus_codes[0];
 }
 
-static u8 get_data_type_by_code(struct vd55g1 *sensor, u32 code)
+static s32 vd55g1_get_pixel_rate(struct vd55g1 *sensor,
+				 struct v4l2_mbus_framefmt *format)
 {
-	struct i2c_client *client = sensor->i2c_client;
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(vd55g1_mbus_codes); i++) {
-		if (vd55g1_mbus_codes[i].code == code)
-			return vd55g1_mbus_codes[i].data_type;
-	}
-	/* Should never happen */
-	dev_warn(&client->dev, "Unsupported code %d. default to MIPI_CSI2_DT_RAW8 data type",
-		 code);
-	return MIPI_CSI2_DT_RAW8;
+	return sensor->mipi_rate /
+			vd55g1_get_fmt_desc(sensor, format->code)->bpp;
 }
 
-static s32 get_pixel_rate(struct vd55g1 *sensor)
-{
-#if KERNEL_LACKS_ACTIVE_STATES
-	const struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
-#elif KERNEL_LACKS_NEW_STATES_API
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_mbus_framefmt *format =
-		v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
-#else
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_mbus_framefmt *format =
-		v4l2_subdev_state_get_format(state, 0);
-#endif
-
-	return div64_u64((u64)sensor->data_rate_in_mbps,
-			 get_bpp_by_code(sensor, format->code));
-}
-
-static s32 get_min_line_length(struct vd55g1 *sensor)
+static unsigned int vd55g1_get_hblank_min(struct vd55g1 *sensor,
+					  struct v4l2_mbus_framefmt *format,
+					  struct v4l2_rect *crop)
 {
 	u32 mipi_req_line_time;
 	u32 mipi_req_line_length;
 	u32 min_line_length;
-#if KERNEL_LACKS_ACTIVE_STATES
-	const struct v4l2_rect *crop = &sensor->active_crop;
-	const struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
-#elif KERNEL_LACKS_NEW_STATES_API
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop =
-		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
-	const struct v4l2_mbus_framefmt *format =
-		v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
-#else
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop =
-		v4l2_subdev_state_get_crop(state, 0);
-	const struct v4l2_mbus_framefmt *format =
-		v4l2_subdev_state_get_format(state, 0);
-#endif
 
 	/* MIPI required time */
 	mipi_req_line_time = (crop->width *
-			      get_bpp_by_code(sensor, format->code) +
+			      vd55g1_get_fmt_desc(sensor, format->code)->bpp +
 			      VD55G1_MIPI_MARGIN) /
-			      (sensor->data_rate_in_mbps / MEGA);
+			      (sensor->mipi_rate / MEGA);
 	mipi_req_line_length = mipi_req_line_time * sensor->pixel_clock /
 			       HZ_PER_MHZ;
 
@@ -759,43 +717,15 @@ static s32 get_min_line_length(struct vd55g1 *sensor)
 		min_line_length = VD55G1_LINE_LENGTH_SUB_MIN;
 
 	/* Respect both constraint */
-	return max(min_line_length, mipi_req_line_length);
+	min_line_length = max(min_line_length, mipi_req_line_length);
+
+	return min_line_length - crop->width;
 }
 
-static unsigned int get_hblank_min(struct vd55g1 *sensor)
+static void vd55g1_get_vblank_limits(struct vd55g1 *sensor,
+				     struct v4l2_rect *crop,
+				     struct vd55g1_vblank_limits *limits)
 {
-#if KERNEL_LACKS_ACTIVE_STATES
-	const struct v4l2_rect *crop = &sensor->active_crop;
-#elif KERNEL_LACKS_NEW_STATES_API
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop =
-		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
-#else
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
-#endif
-
-	return get_min_line_length(sensor) - crop->width;
-}
-
-static void get_vblank_limits(struct vd55g1 *sensor,
-			      struct vblank_limits *limits)
-{
-#if KERNEL_LACKS_ACTIVE_STATES
-	const struct v4l2_rect *crop = &sensor->active_crop;
-#elif KERNEL_LACKS_NEW_STATES_API
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop =
-		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
-#else
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
-#endif
-
 	limits->min = VD55G1_VBLANK_MIN;
 	limits->def = VD55G1_FRAME_LENGTH_DEF - crop->height;
 	limits->max = VD55G1_VBLANK_MAX - crop->height;
@@ -804,7 +734,6 @@ static void get_vblank_limits(struct vd55g1 *sensor,
 #if KERNEL_LACKS_CCI
 static int vd55g1_read(struct vd55g1 *sensor, u32 reg, u64 *val, int *err)
 {
-	struct i2c_client *client = sensor->i2c_client;
 	unsigned int len = (reg >> CCI_REG_WIDTH_SHIFT) & 7;
 	u8 buf[4];
 	int ret;
@@ -816,7 +745,7 @@ static int vd55g1_read(struct vd55g1 *sensor, u32 reg, u64 *val, int *err)
 
 	ret = regmap_bulk_read(sensor->regmap, reg, buf, len);
 	if (ret) {
-		dev_err(&client->dev, "%s: Error reading reg 0x%04x: %d\n",
+		dev_err(sensor->dev, "%s: Error reading reg 0x%04x: %d\n",
 			__func__, reg, ret);
 		goto out;
 	}
@@ -832,7 +761,7 @@ static int vd55g1_read(struct vd55g1 *sensor, u32 reg, u64 *val, int *err)
 		*val = get_unaligned_le32(buf);
 		break;
 	default:
-		dev_err(&client->dev,
+		dev_err(sensor->dev,
 			"%s: Error invalid reg-width %u for reg 0x%04x\n",
 			__func__, len, reg);
 		ret = -EINVAL;
@@ -848,7 +777,6 @@ out:
 
 static int vd55g1_write(struct vd55g1 *sensor, u32 reg, u64 val, int *err)
 {
-	struct i2c_client *client = sensor->i2c_client;
 	unsigned int len = (reg >> CCI_REG_WIDTH_SHIFT) & 7;
 	u8 buf[4];
 	int ret;
@@ -868,7 +796,7 @@ static int vd55g1_write(struct vd55g1 *sensor, u32 reg, u64 val, int *err)
 		put_unaligned_le32(val, buf);
 		break;
 	default:
-		dev_err(&client->dev,
+		dev_err(sensor->dev,
 			"%s: Error invalid reg-width %u for reg 0x%04x\n",
 			__func__, len, reg);
 		ret = -EINVAL;
@@ -877,7 +805,7 @@ static int vd55g1_write(struct vd55g1 *sensor, u32 reg, u64 val, int *err)
 
 	ret = regmap_bulk_write(sensor->regmap, reg, buf, len);
 	if (ret)
-		dev_err(&client->dev, "%s: Error writing reg 0x%04x: %d\n",
+		dev_err(sensor->dev, "%s: Error writing reg 0x%04x: %d\n",
 			__func__, reg, ret);
 
 out:
@@ -949,50 +877,41 @@ static int vd55g1_wait_state(struct vd55g1 *sensor, int state, int *err)
 	return vd55g1_poll_reg(sensor, VD55G1_REG_SYSTEM_FSM, state, err);
 }
 
-static int vd55g1_get_regulators(struct vd55g1 *sensor)
-{
-	unsigned int i;
-
-	for (i = 0; i < ARRAY_SIZE(vd55g1_supply_name); i++)
-		sensor->supplies[i].supply = vd55g1_supply_name[i];
-
-	return devm_regulator_bulk_get(&sensor->i2c_client->dev,
-				       ARRAY_SIZE(vd55g1_supply_name),
-				       sensor->supplies);
-}
-
 static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 {
-	struct i2c_client *client = sensor->i2c_client;
-	/* Double data rate */
-	u32 mipi_freq = sensor->link_freq * 2;
 	u32 sys_clk, mipi_div, pixel_div;
-	int ret = 0;
 
-	if (sensor->xclk_freq < 6 * HZ_PER_MHZ ||
-	    sensor->xclk_freq > 27 * HZ_PER_MHZ) {
-		dev_err(&client->dev,
-			"Only 6Mhz-27Mhz clock range supported. Provided %lu MHz\n",
+	if (sensor->xclk_freq < VD55G1_XCLK_FREQ_MIN ||
+	    sensor->xclk_freq > VD55G1_XCLK_FREQ_MAX) {
+		dev_err(sensor->dev,
+			"Only %luMhz-%luMhz clock range supported. Provided %lu MHz\n",
+			VD55G1_XCLK_FREQ_MIN / HZ_PER_MHZ,
+			VD55G1_XCLK_FREQ_MAX / HZ_PER_MHZ,
 			sensor->xclk_freq / HZ_PER_MHZ);
 		return -EINVAL;
 	}
 
-	if (mipi_freq < 250 * HZ_PER_MHZ ||
-	    mipi_freq > 1200 * HZ_PER_MHZ) {
-		dev_err(&client->dev,
-			"Only 250Mhz-1200Mhz link frequency range supported. Provided %lu MHz\n",
-			mipi_freq / HZ_PER_MHZ);
+	/* MIPI bus is double data rate */
+	sensor->mipi_rate = sensor->link_freq * 2;
+
+	if (sensor->mipi_rate < VD55G1_MIPI_RATE_MIN ||
+	    sensor->mipi_rate > VD55G1_MIPI_RATE_MAX) {
+		dev_err(sensor->dev,
+			"Only %luMbps-%luMbps data rate range supported. Provided %lu Mbps\n",
+			VD55G1_MIPI_RATE_MIN / MEGA,
+			VD55G1_MIPI_RATE_MAX / MEGA,
+			sensor->mipi_rate / MEGA);
 		return -EINVAL;
 	}
 
-	if (mipi_freq <= 300 * HZ_PER_MHZ)
+	if (sensor->mipi_rate <= 300 * MEGA)
 		mipi_div = 4;
-	else if (mipi_freq <= 600 * HZ_PER_MHZ)
+	else if (sensor->mipi_rate <= 600 * MEGA)
 		mipi_div = 2;
 	else
 		mipi_div = 1;
 
-	sys_clk = mipi_freq * mipi_div;
+	sys_clk = sensor->mipi_rate * mipi_div;
 
 	if (sys_clk <= 780 * HZ_PER_MHZ)
 		pixel_div = 5;
@@ -1002,10 +921,8 @@ static int vd55g1_prepare_clock_tree(struct vd55g1 *sensor)
 		pixel_div = 8;
 
 	sensor->pixel_clock = sys_clk / pixel_div;
-	/* Frequency to data rate is 1:1 ratio for MIPI */
-	sensor->data_rate_in_mbps = mipi_freq;
 
-	return ret;
+	return 0;
 }
 
 static int vd55g1_update_patgen(struct vd55g1 *sensor, u32 patgen_index)
@@ -1058,10 +975,9 @@ static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
 		vd55g1_write(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
 			     sensor->again_ctrl->val, &ret);
 
-	if (!is_auto && sensor->dgain_ctrl->is_new) {
+	if (!is_auto && sensor->dgain_ctrl->is_new)
 		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
 			     sensor->dgain_ctrl->val, &ret);
-	}
 
 	return ret;
 }
@@ -1169,21 +1085,9 @@ static int vd55g1_update_exposure_target(struct vd55g1 *sensor, int index)
 			    exposure_target, NULL);
 }
 
-static int vd55g1_apply_cold_start(struct vd55g1 *sensor)
+static int vd55g1_apply_cold_start(struct vd55g1 *sensor,
+				   struct v4l2_rect *crop)
 {
-#if KERNEL_LACKS_ACTIVE_STATES
-	const struct v4l2_rect *crop = &sensor->active_crop;
-#elif KERNEL_LACKS_NEW_STATES_API
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop =
-		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
-#else
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
-#endif
-
 	/*
 	 * Cold start register is a single register expressed as exposure time
 	 * in us. This differ from status registers being a combination of
@@ -1266,41 +1170,26 @@ static int vd55g1_update_hdr_mode(struct vd55g1 *sensor)
 	return ret;
 }
 
-static int vd55g1_set_framefmt(struct vd55g1 *sensor)
+static int vd55g1_set_framefmt(struct vd55g1 *sensor,
+			       struct v4l2_mbus_framefmt *format,
+			       struct v4l2_rect *crop)
 {
-#if KERNEL_LACKS_ACTIVE_STATES
-	const struct v4l2_rect *crop = &sensor->active_crop;
-	const struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
-#elif KERNEL_LACKS_NEW_STATES_API
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop =
-		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
-	const struct v4l2_mbus_framefmt *format =
-		v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
-#else
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop =
-		v4l2_subdev_state_get_crop(state, 0);
-	const struct v4l2_mbus_framefmt *format =
-		v4l2_subdev_state_get_format(state, 0);
-#endif
-	enum vd55g1_bin_mode binning;
+	u8 binning;
 	int ret = 0;
 
 	vd55g1_write(sensor, VD55G1_REG_FORMAT_CTRL,
-		     get_bpp_by_code(sensor, format->code), &ret);
+		     vd55g1_get_fmt_desc(sensor, format->code)->bpp, &ret);
 	vd55g1_write(sensor, VD55G1_REG_OIF_IMG_CTRL,
-		     get_data_type_by_code(sensor, format->code), &ret);
+		     vd55g1_get_fmt_desc(sensor, format->code)->data_type,
+		     &ret);
 
 	switch (crop->width / format->width) {
 	case 1:
 	default:
-		binning = VD55G1_BIN_MODE_NORMAL;
+		binning = VD55G1_READOUT_CTRL_BIN_MODE_NORMAL;
 		break;
 	case 2:
-		binning = VD55G1_BIN_MODE_DIGITAL_X2;
+		binning = VD55G1_READOUT_CTRL_BIN_MODE_DIGITAL_X2;
 		break;
 	}
 	vd55g1_write(sensor, VD55G1_REG_READOUT_CTRL, binning, &ret);
@@ -1321,7 +1210,7 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor)
 static int vd55g1_update_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
 {
 	unsigned long io;
-	u32 gpio_val;
+	u8 gpio_val;
 	int ret = 0;
 
 	for_each_set_bit(io, &gpio_mask, VD55G1_NB_GPIOS) {
@@ -1349,35 +1238,19 @@ static int vd55g1_update_gpios(struct vd55g1 *sensor, unsigned long gpio_mask)
 	return ret;
 }
 
-static int vd55g1_ro_ctrls_setup(struct vd55g1 *sensor)
+static int vd55g1_ro_ctrls_setup(struct vd55g1 *sensor, struct v4l2_rect *crop)
 {
-#if KERNEL_LACKS_ACTIVE_STATES
-	const struct v4l2_rect *crop = &sensor->active_crop;
-
-#elif KERNEL_LACKS_NEW_STATES_API
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop =
-		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
-
-#else
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
-
-#endif
 	return vd55g1_write(sensor, VD55G1_REG_LINE_LENGTH,
 			    crop->width + sensor->hblank_ctrl->val, NULL);
 }
 
-static void vd55g1_lock_ctrls(struct vd55g1 *sensor, bool enable)
+static void vd55g1_grab_ctrls(struct vd55g1 *sensor, bool enable)
 {
 	/* These settings cannot change during stream */
 	v4l2_ctrl_grab(sensor->hflip_ctrl, enable);
 	v4l2_ctrl_grab(sensor->vflip_ctrl, enable);
 	v4l2_ctrl_grab(sensor->patgen_ctrl, enable);
 	v4l2_ctrl_grab(sensor->hdr_ctrl, enable);
-	v4l2_ctrl_grab(sensor->hblank_ctrl, enable);
 	if (sensor->ext_vt_sync)
 		v4l2_ctrl_grab(sensor->slave_ctrl, enable);
 }
@@ -1391,32 +1264,45 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 #endif
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
-	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
-	int ret = 0;
+#if KERNEL_LACKS_ACTIVE_STATES
+	struct v4l2_rect *crop = &sensor->active_crop;
+	struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
+#elif KERNEL_LACKS_NEW_STATES_API
+	struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+#else
+	struct v4l2_rect *crop =
+		v4l2_subdev_state_get_crop(state, 0);
+	struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_state_get_format(state, 0);
+#endif
+	int ret;
 
 #if (KERNEL_VERSION(5, 9, 0) > LINUX_VERSION_CODE)
-	ret = __pm_runtime_resume(&client->dev, RPM_GET_PUT);
+	ret = __pm_runtime_resume(sensor->dev, RPM_GET_PUT);
 	if (ret < 0) {
-		pm_runtime_put_noidle(&client->dev);
+		pm_runtime_put_noidle(sensor->dev);
 		return ret;
 	}
 #else
-	ret = pm_runtime_resume_and_get(&client->dev);
+	ret = pm_runtime_resume_and_get(sensor->dev);
 #endif
 	if (ret < 0)
 		return ret;
 
 	vd55g1_write(sensor, VD55G1_REG_EXT_CLOCK, sensor->xclk_freq, &ret);
 
-	/* configure output */
+	/* Configure output */
 	vd55g1_write(sensor, VD55G1_REG_MIPI_DATA_RATE,
-		     sensor->data_rate_in_mbps, &ret);
+		     sensor->mipi_rate, &ret);
 	vd55g1_write(sensor, VD55G1_REG_OIF_CTRL, sensor->oif_ctrl, &ret);
 	vd55g1_write(sensor, VD55G1_REG_ISL_ENABLE, 0, &ret);
 	if (ret)
 		goto err_rpm_put;
 
-	ret = vd55g1_set_framefmt(sensor);
+	ret = vd55g1_set_framefmt(sensor, format, crop);
 	if (ret)
 		goto err_rpm_put;
 
@@ -1425,7 +1311,7 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 	if (ret)
 		goto err_rpm_put;
 
-	ret = vd55g1_apply_cold_start(sensor);
+	ret = vd55g1_apply_cold_start(sensor, crop);
 	if (ret)
 		goto err_rpm_put;
 
@@ -1435,7 +1321,7 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 		goto err_rpm_put;
 
 	/* Also apply settings from read-only V4L2 ctrls */
-	ret = vd55g1_ro_ctrls_setup(sensor);
+	ret = vd55g1_ro_ctrls_setup(sensor, crop);
 	if (ret)
 		goto err_rpm_put;
 
@@ -1446,14 +1332,14 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 	if (ret)
 		goto err_rpm_put;
 
-	vd55g1_lock_ctrls(sensor, true);
+	vd55g1_grab_ctrls(sensor, true);
 	sensor->streaming = true;
 
-	return ret;
+	return 0;
 
 err_rpm_put:
-	pm_runtime_put(&client->dev);
-	return ret;
+	pm_runtime_put(sensor->dev);
+	return 0;
 }
 
 #if KERNEL_LACKS_STREAMS_API
@@ -1465,7 +1351,6 @@ static int vd55g1_disable_streams(struct v4l2_subdev *sd,
 #endif
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
-	struct i2c_client *client = v4l2_get_subdevdata(&sensor->sd);
 	int ret = 0;
 
 	/* Retrieve Expo cluster to enable coldstart of AE */
@@ -1477,20 +1362,19 @@ static int vd55g1_disable_streams(struct v4l2_subdev *sd,
 	vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY, &ret);
 
 	if (ret)
-		dev_warn(&client->dev, "Can't disable stream");
+		dev_warn(sensor->dev, "Can't disable stream\n");
 
-	vd55g1_lock_ctrls(sensor, false);
+	vd55g1_grab_ctrls(sensor, false);
 	sensor->streaming = false;
 
-	pm_runtime_mark_last_busy(&client->dev);
-	pm_runtime_put_autosuspend(&client->dev);
+	pm_runtime_mark_last_busy(sensor->dev);
+	pm_runtime_put_autosuspend(sensor->dev);
 
 	return ret;
 }
 
 static int vd55g1_patch(struct vd55g1 *sensor)
 {
-	struct i2c_client *client = sensor->i2c_client;
 	u64 patch;
 	int ret = 0;
 
@@ -1499,20 +1383,20 @@ static int vd55g1_patch(struct vd55g1 *sensor)
 	vd55g1_write(sensor, VD55G1_REG_BOOT, VD55G1_BOOT_PATCH_SETUP, &ret);
 	vd55g1_poll_reg(sensor, VD55G1_REG_BOOT, 0, &ret);
 	if (ret) {
-		dev_err(&client->dev, "Failed to apply patch");
+		dev_err(sensor->dev, "Failed to apply patch\n");
 		return ret;
 	}
 
 	vd55g1_read(sensor, VD55G1_REG_FWPATCH_REVISION, &patch, &ret);
 	if (patch != (VD55G1_FWPATCH_REVISION_MAJOR << 8) +
 	    VD55G1_FWPATCH_REVISION_MINOR) {
-		dev_err(&client->dev, "Bad patch version expected %d.%d got %d.%d",
+		dev_err(sensor->dev, "Bad patch version expected %d.%d got %d.%d\n",
 			VD55G1_FWPATCH_REVISION_MAJOR,
 			VD55G1_FWPATCH_REVISION_MINOR,
 			(u8)(patch >> 8), (u8)(patch & 0xff));
 		return -ENODEV;
 	}
-	dev_dbg(&client->dev, "patch %d.%d applied",
+	dev_dbg(sensor->dev, "patch %d.%d applied\n",
 		(u8)(patch >> 8), (u8)(patch & 0xff));
 
 	return 0;
@@ -1608,28 +1492,18 @@ static int vd55g1_get_pad_fmt(struct v4l2_subdev *sd,
 }
 #endif
 
-static int vd55g1_new_format_change_controls(struct vd55g1 *sensor)
+static int vd55g1_new_format_change_controls(struct vd55g1 *sensor,
+					     struct v4l2_mbus_framefmt *format,
+					     struct v4l2_rect *crop)
 {
-#if KERNEL_LACKS_ACTIVE_STATES
-	const struct v4l2_rect *crop = &sensor->active_crop;
-#elif KERNEL_LACKS_NEW_STATES_API
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop =
-		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
-#else
-	struct v4l2_subdev_state *state =
-		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
-#endif
-	struct vblank_limits vblank;
+	struct vd55g1_vblank_limits vblank;
 	unsigned int hblank;
 	unsigned int frame_length = 0;
 	unsigned int expo_max;
 	int ret;
 
 	/* Reset vblank and frame length to default */
-	get_vblank_limits(sensor, &vblank);
+	vd55g1_get_vblank_limits(sensor, crop, &vblank);
 	ret = __v4l2_ctrl_modify_range(sensor->vblank_ctrl, vblank.min,
 				       vblank.max, 1, vblank.def);
 	if (ret)
@@ -1645,12 +1519,12 @@ static int vd55g1_new_format_change_controls(struct vd55g1 *sensor)
 
 	/* Update pixel rate to reflect new bpp */
 	ret = __v4l2_ctrl_s_ctrl_int64(sensor->pixel_rate_ctrl,
-				       get_pixel_rate(sensor));
+				       vd55g1_get_pixel_rate(sensor, format));
 	if (ret)
 		return ret;
 
 	/* Update hblank according to new width */
-	hblank = get_hblank_min(sensor);
+	hblank = vd55g1_get_hblank_min(sensor, format, crop);
 	ret = __v4l2_ctrl_modify_range(sensor->hblank_ctrl, hblank, hblank, 1,
 				       hblank);
 
@@ -1709,7 +1583,9 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	} else {
 		sensor->active_fmt = sd_fmt->format;
 		sensor->active_crop = pad_crop;
-		return vd55g1_new_format_change_controls(sensor);
+		return vd55g1_new_format_change_controls(sensor,
+							 &sd_fmt->format,
+							 &pad_crop);
 	}
 
 	mutex_unlock(&sensor->lock);
@@ -1730,7 +1606,9 @@ static int vd55g1_set_pad_fmt(struct v4l2_subdev *sd,
 	*v4l2_subdev_state_get_crop(sd_state, sd_fmt->pad) = pad_crop;
 #endif
 	if (sd_fmt->which == V4L2_SUBDEV_FORMAT_ACTIVE)
-		return vd55g1_new_format_change_controls(sensor);
+		return vd55g1_new_format_change_controls(sensor,
+							 &sd_fmt->format,
+							 &pad_crop);
 
 	return 0;
 #endif
@@ -1844,14 +1722,12 @@ static const struct v4l2_subdev_ops vd55g1_subdev_ops = {
 
 static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 {
-	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
-	struct vd55g1 *sensor = to_vd55g1(sd);
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct vd55g1 *sensor = ctrl_to_vd55g1(ctrl);
 	int temperature;
 	int ret = 0;
 
 	/* Interact with HW only when it is powered ON */
-	if (!pm_runtime_get_if_in_use(&client->dev))
+	if (!pm_runtime_get_if_in_use(sensor->dev))
 		return 0;
 
 	switch (ctrl->id) {
@@ -1869,33 +1745,37 @@ static int vd55g1_g_volatile_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
-	pm_runtime_mark_last_busy(&client->dev);
-	pm_runtime_put_autosuspend(&client->dev);
+	pm_runtime_mark_last_busy(sensor->dev);
+	pm_runtime_put_autosuspend(sensor->dev);
 
 	return ret;
 }
 
 static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 {
-	struct v4l2_subdev *sd = ctrl_to_sd(ctrl);
-	struct vd55g1 *sensor = to_vd55g1(sd);
-	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct vd55g1 *sensor = ctrl_to_vd55g1(ctrl);
 	unsigned int frame_length = 0;
 	unsigned int expo_max;
-	unsigned int hblank = get_hblank_min(sensor);
-	bool is_auto = false;
 #if KERNEL_LACKS_ACTIVE_STATES
-	const struct v4l2_rect *crop = &sensor->active_crop;
+	struct v4l2_rect *crop = &sensor->active_crop;
+	struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
 #elif KERNEL_LACKS_NEW_STATES_API
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop =
+	struct v4l2_rect *crop =
 		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
 #else
 	struct v4l2_subdev_state *state =
 		v4l2_subdev_get_locked_active_state(&sensor->sd);
-	const struct v4l2_rect *crop = v4l2_subdev_state_get_crop(state, 0);
+	struct v4l2_rect *crop =
+		v4l2_subdev_state_get_crop(state, 0);
+	struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_state_get_format(state, 0);
 #endif
+	unsigned int hblank = vd55g1_get_hblank_min(sensor, format, crop);
+	bool is_auto = false;
 	int ret = 0;
 
 	if (ctrl->flags & V4L2_CTRL_FLAG_READ_ONLY)
@@ -1939,7 +1819,7 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		return ret;
 
 	/* Interact with HW only when it is powered ON */
-	if (!pm_runtime_get_if_in_use(&client->dev))
+	if (!pm_runtime_get_if_in_use(sensor->dev))
 		return 0;
 
 	switch (ctrl->id) {
@@ -1990,8 +1870,8 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 		break;
 	}
 
-	pm_runtime_mark_last_busy(&client->dev);
-	pm_runtime_put_autosuspend(&client->dev);
+	pm_runtime_mark_last_busy(sensor->dev);
+	pm_runtime_put_autosuspend(sensor->dev);
 
 	return ret;
 }
@@ -2054,11 +1934,28 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 #if !KERNEL_LACKS_DEVICE_PROPERTIES
 	struct v4l2_fwnode_device_properties fwnode_props;
 #endif
-	struct vblank_limits vblank;
+	struct vd55g1_vblank_limits vblank;
 	unsigned int hblank;
-#if !KERNEL_LACKS_DEVICE_PROPERTIES
-	int ret;
+#if KERNEL_LACKS_ACTIVE_STATES
+	struct v4l2_rect *crop = &sensor->active_crop;
+	struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
+#elif KERNEL_LACKS_NEW_STATES_API
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_lock_and_get_active_state(&sensor->sd);
+	struct v4l2_rect *crop =
+		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
+	struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_get_pad_format(&sensor->sd, state, 0);
+#else
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_lock_and_get_active_state(&sensor->sd);
+	struct v4l2_rect *crop =
+		v4l2_subdev_state_get_crop(state, 0);
+	struct v4l2_mbus_framefmt *format =
+		v4l2_subdev_state_get_format(state, 0);
 #endif
+	s32 pixel_rate = vd55g1_get_pixel_rate(sensor, format);
+	int ret;
 
 	v4l2_ctrl_handler_init(hdl, 16);
 #if KERNEL_LACKS_ACTIVE_STATES
@@ -2099,7 +1996,7 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 	sensor->pixel_rate_ctrl = v4l2_ctrl_new_std(hdl, ops,
 						    V4L2_CID_PIXEL_RATE, 1,
 						    INT_MAX, 1,
-						    get_pixel_rate(sensor));
+						    pixel_rate);
 	if (sensor->pixel_rate_ctrl)
 		sensor->pixel_rate_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	sensor->ae_lock_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_3A_LOCK,
@@ -2119,12 +2016,12 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 					     ARRAY_SIZE(vd55g1_hdr_menu) - 1, 0,
 					     VD55G1_NO_HDR, vd55g1_hdr_menu);
 	#endif
-	hblank = get_hblank_min(sensor);
+	hblank = vd55g1_get_hblank_min(sensor, format, crop);
 	sensor->hblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_HBLANK,
 						hblank, hblank, 1, hblank);
 	if (sensor->hblank_ctrl)
 		sensor->hblank_ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
-	get_vblank_limits(sensor, &vblank);
+	vd55g1_get_vblank_limits(sensor, crop, &vblank);
 	sensor->vblank_ctrl = v4l2_ctrl_new_std(hdl, ops, V4L2_CID_VBLANK,
 						vblank.min, vblank.max,
 						1, vblank.def);
@@ -2148,8 +2045,10 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 					       V4L2_FLASH_LED_MODE_NONE);
 	}
 
-#if !KERNEL_LACKS_DEVICE_PROPERTIES
-	ret = v4l2_fwnode_device_parse(&sensor->i2c_client->dev, &fwnode_props);
+#if KERNEL_LACKS_DEVICE_PROPERTIES
+	ret = 0;
+#else
+	ret = v4l2_fwnode_device_parse(sensor->dev, &fwnode_props);
 	if (ret)
 		goto free_ctrls;
 
@@ -2159,37 +2058,22 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 #endif
 
 	sensor->sd.ctrl_handler = hdl;
-	return 0;
+	goto unlock_state;
 
 #if !KERNEL_LACKS_DEVICE_PROPERTIES
 free_ctrls:
 	v4l2_ctrl_handler_free(hdl);
-	return ret;
 #endif
-}
-
-static int vd55g1_check_sensor_revision(struct vd55g1 *sensor)
-{
-	struct i2c_client *client = sensor->i2c_client;
-	u64 device_rev;
-	int ret;
-
-	ret = vd55g1_read(sensor, VD55G1_REG_REVISION, &device_rev, NULL);
-	if (ret)
-		return ret;
-
-	if (device_rev != VD55G1_REVISION_CCB) {
-		dev_err(&client->dev, "Unsupported sensor revision (0x%x)\n",
-			(u16)device_rev);
-		return -ENODEV;
-	}
-
-	return 0;
+unlock_state:
+#if !KERNEL_LACKS_ACTIVE_STATES
+	v4l2_subdev_unlock_state(state);
+#endif
+	return ret;
 }
 
 static int vd55g1_detect(struct vd55g1 *sensor)
 {
-	struct i2c_client *client = sensor->i2c_client;
+	u64 device_rev;
 	u64 id;
 	int ret;
 
@@ -2198,11 +2082,21 @@ static int vd55g1_detect(struct vd55g1 *sensor)
 		return ret;
 
 	if (id != VD55G1_MODEL_ID) {
-		dev_warn(&client->dev, "Unsupported sensor id %x", (u32)id);
+		dev_warn(sensor->dev, "Unsupported sensor id %x\n", (u32)id);
 		return -ENODEV;
 	}
 
-	return vd55g1_check_sensor_revision(sensor);
+	ret = vd55g1_read(sensor, VD55G1_REG_REVISION, &device_rev, NULL);
+	if (ret)
+		return ret;
+
+	if (device_rev != VD55G1_REVISION_CCB) {
+		dev_err(sensor->dev, "Unsupported sensor revision (0x%x)\n",
+			(u16)device_rev);
+		return -ENODEV;
+	}
+
+	return 0;
 }
 
 static int vd55g1_power_on(struct device *dev)
@@ -2214,13 +2108,13 @@ static int vd55g1_power_on(struct device *dev)
 	ret = regulator_bulk_enable(ARRAY_SIZE(vd55g1_supply_name),
 				    sensor->supplies);
 	if (ret) {
-		dev_err(dev, "Failed to enable regulators %d", ret);
+		dev_err(dev, "Failed to enable regulators %d\n", ret);
 		return ret;
 	}
 
 	ret = clk_prepare_enable(sensor->xclk);
 	if (ret) {
-		dev_err(dev, "Failed to enable clock %d", ret);
+		dev_err(dev, "Failed to enable clock %d\n", ret);
 		goto disable_bulk;
 	}
 
@@ -2234,19 +2128,19 @@ static int vd55g1_power_on(struct device *dev)
 
 	ret = vd55g1_detect(sensor);
 	if (ret) {
-		dev_err(dev, "Sensor detect failed %d", ret);
+		dev_err(dev, "Sensor detect failed %d\n", ret);
 		goto disable_clock;
 	}
 
 	ret = vd55g1_patch(sensor);
 	if (ret) {
-		dev_err(dev, "Sensor patch failed %d", ret);
+		dev_err(dev, "Sensor patch failed %d\n", ret);
 		goto disable_clock;
 	}
 
 	ret = vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_SW_STBY, NULL);
 	if (ret) {
-		dev_err(dev, "Sensor waiting after patch failed %d",
+		dev_err(dev, "Sensor waiting after patch failed %d\n",
 			ret);
 		goto disable_clock;
 	}
@@ -2268,23 +2162,23 @@ static int vd55g1_power_off(struct device *dev)
 	struct v4l2_subdev *sd = dev_get_drvdata(dev);
 	struct vd55g1 *sensor = to_vd55g1(sd);
 
-	clk_disable_unprepare(sensor->xclk);
 	gpiod_set_value_cansleep(sensor->reset_gpio, 1);
+	clk_disable_unprepare(sensor->xclk);
 	regulator_bulk_disable(ARRAY_SIZE(sensor->supplies), sensor->supplies);
+
 	return 0;
 }
 
 static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 				 struct fwnode_handle *endpoint)
 {
-	struct i2c_client *client = sensor->i2c_client;
 #if KERNEL_LACKS_NEW_EP_ALLOC
 	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2 };
 #else
 	struct v4l2_fwnode_endpoint ep = { .bus_type = V4L2_MBUS_CSI2_DPHY };
 #endif
 	u8 n_lanes;
-	int ret = 0;
+	int ret;
 
 #if KERNEL_LACKS_NEW_EP_ALLOC
 	struct v4l2_fwnode_endpoint *ep_ptr =
@@ -2301,7 +2195,7 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 	/* Check lanes number */
 	n_lanes = ep.bus.mipi_csi2.num_data_lanes;
 	if (n_lanes != 1) {
-		dev_err(&client->dev, "Sensor only supports 1 lane, found %d\n",
+		dev_err(sensor->dev, "Sensor only supports 1 lane, found %d\n",
 			n_lanes);
 		ret = -EINVAL;
 		goto done;
@@ -2309,7 +2203,7 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 
 	/* Clock lane must be first */
 	if (ep.bus.mipi_csi2.clock_lane != 0) {
-		dev_err(&client->dev, "Clock lane must be mapped to lane 0\n");
+		dev_err(sensor->dev, "Clock lane must be mapped to lane 0\n");
 		ret = -EINVAL;
 		goto done;
 	}
@@ -2320,12 +2214,12 @@ static int vd55g1_check_csi_conf(struct vd55g1 *sensor,
 
 	/* Check the link frequency set in device tree */
 	if (!ep.nr_of_link_frequencies) {
-		dev_err(&client->dev, "link-frequency property not found in DT\n");
+		dev_err(sensor->dev, "link-frequency property not found in DT\n");
 		ret = -EINVAL;
 		goto done;
 	}
 	if (ep.nr_of_link_frequencies != 1) {
-		dev_err(&client->dev, "Multiple link frequencies not supported\n");
+		dev_err(sensor->dev, "Multiple link frequencies not supported\n");
 		ret = -EINVAL;
 		goto done;
 	}
@@ -2344,15 +2238,13 @@ done:
 static int vd55g1_parse_dt_gpios_array(struct vd55g1 *sensor,
 				       char *prop_name, u32 *array, int *nb)
 {
-	struct i2c_client *client = sensor->i2c_client;
-	struct device *dev = &client->dev;
 	unsigned int i;
 	int ret;
 
 #if KERNEL_VERSION(5, 3, 0) > LINUX_VERSION_CODE
-	*nb = device_property_read_u32_array(dev, prop_name, NULL, 0);
+	*nb = device_property_read_u32_array(sensor->dev, prop_name, NULL, 0);
 #else
-	*nb = device_property_count_u32(dev, prop_name);
+	*nb = device_property_count_u32(sensor->dev, prop_name);
 #endif
 	if (*nb == -EINVAL) {
 		/* Property not found */
@@ -2360,14 +2252,15 @@ static int vd55g1_parse_dt_gpios_array(struct vd55g1 *sensor,
 		return 0;
 	}
 
-	ret = device_property_read_u32_array(dev, prop_name, array, *nb);
+	ret = device_property_read_u32_array(sensor->dev,
+					     prop_name, array, *nb);
 	if (ret) {
-		dev_err(&client->dev, "Failed to read %s prop\n", prop_name);
+		dev_err(sensor->dev, "Failed to read %s prop\n", prop_name);
 		return ret;
 	}
 	for (i = 0; i < *nb;  i++) {
 		if (array[i] >= VD55G1_NB_GPIOS) {
-			dev_err(&client->dev, "Invalid GPIO number %d\n",
+			dev_err(sensor->dev, "Invalid GPIO number %d\n",
 				array[i]);
 			return -EINVAL;
 		}
@@ -2378,8 +2271,6 @@ static int vd55g1_parse_dt_gpios_array(struct vd55g1 *sensor,
 
 static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 {
-	struct i2c_client *client = sensor->i2c_client;
-	struct device *dev = &client->dev;
 	u32 led_gpios[VD55G1_NB_GPIOS];
 	int nb_gpios_leds;
 	u32 out_sync_gpios[VD55G1_NB_GPIOS];
@@ -2412,7 +2303,7 @@ static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 
 	for (i = 0; i < nb_gpios_out; i++) {
 		if (sensor->gpios[out_sync_gpios[i]] != VD55G1_GPIO_MODE_IN) {
-			dev_err(&client->dev, "Multiple use of GPIO %d\n",
+			dev_err(sensor->dev, "Multiple use of GPIO %d\n",
 				out_sync_gpios[i]);
 			return -EINVAL;
 		}
@@ -2420,19 +2311,20 @@ static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 	}
 
 	/* Take into account optional 'st,in-sync' input for GPIO0 */
-	ret = device_property_read_u32(dev, "st,in-sync", &in_sync_gpio);
+	ret = device_property_read_u32(sensor->dev,
+				       "st,in-sync", &in_sync_gpio);
 	if (ret < 0 && ret != -EINVAL) {
-		dev_err(&client->dev, "Failed to read st,in-sync prop\n");
+		dev_err(sensor->dev, "Failed to read st,in-sync prop\n");
 		return ret;
 	} else if (ret == -EINVAL) {
 		sensor->ext_vt_sync = false;
 	} else {
 		if (in_sync_gpio != VD55G1_VTSLAVE_GPIO) {
-			dev_err(&client->dev, "in-sync GPIO must be gpio0\n");
+			dev_err(sensor->dev, "in-sync GPIO must be gpio0\n");
 			return -EINVAL;
 		}
 		if (sensor->gpios[in_sync_gpio] != VD55G1_GPIO_MODE_IN) {
-			dev_err(&client->dev, "Multiple use of GPIO %d\n",
+			dev_err(sensor->dev, "Multiple use of GPIO %d\n",
 				in_sync_gpio);
 			return -EINVAL;
 		}
@@ -2445,20 +2337,20 @@ static int vd55g1_parse_dt_gpios(struct vd55g1 *sensor)
 
 static int vd55g1_parse_dt(struct vd55g1 *sensor)
 {
-	struct i2c_client *client = sensor->i2c_client;
-	struct device *dev = &client->dev;
 	struct fwnode_handle *endpoint;
 	int ret;
 
 #if KERNEL_VERSION(5, 2, 0) > LINUX_VERSION_CODE
-	endpoint =
-		fwnode_graph_get_next_endpoint(of_fwnode_handle(dev->of_node),
-					       NULL);
+	struct device_node *of_node = sensor->dev->of_node;
+
+	endpoint = fwnode_graph_get_next_endpoint(of_fwnode_handle(of_node),
+						  NULL);
 #else
-	endpoint = fwnode_graph_get_endpoint_by_id(dev_fwnode(dev), 0, 0, 0);
+	endpoint = fwnode_graph_get_endpoint_by_id(dev_fwnode(sensor->dev),
+						   0, 0, 0);
 #endif
 	if (!endpoint) {
-		dev_err(dev, "Endpoint node not found\n");
+		dev_err(sensor->dev, "Endpoint node not found\n");
 		return -EINVAL;
 	}
 
@@ -2472,7 +2364,6 @@ static int vd55g1_parse_dt(struct vd55g1 *sensor)
 
 static int vd55g1_subdev_init(struct vd55g1 *sensor)
 {
-	struct i2c_client *client = sensor->i2c_client;
 #if KERNEL_LACKS_ACTIVE_STATES
 	unsigned int def_mode = VD55G1_DEFAULT_MODE;
 #endif
@@ -2493,7 +2384,7 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	sensor->sd.entity.function = MEDIA_ENT_F_CAM_SENSOR;
 	ret = media_entity_pads_init(&sensor->sd.entity, 1, &sensor->pad);
 	if (ret) {
-		dev_err(&client->dev, "Failed to init media entity : %d", ret);
+		dev_err(sensor->dev, "Failed to init media entity: %d\n", ret);
 		return ret;
 	}
 
@@ -2510,22 +2401,23 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	sensor->sd.state_lock = sensor->ctrl_handler.lock;
 	ret = v4l2_subdev_init_finalize(&sensor->sd);
 	if (ret) {
-		dev_err(&client->dev, "Subdev init error: %d", ret);
+		dev_err(sensor->dev, "Subdev init error: %d\n", ret);
 		goto err_ctrls;
 	}
 #endif
 
 	/*
-	 * Initiliaze controls after v4l2_subdev_init_finalize() to make sure
-	 * default values are set.
+	 * Initialize controls after v4l2_subdev_init_finalize() to make sure
+	 * active state is set
 	 */
 	ret = vd55g1_init_ctrls(sensor);
 	if (ret) {
-		dev_err(&client->dev, "Controls initialization failed %d", ret);
+		dev_err(sensor->dev, "Controls initialization failed %d\n",
+			ret);
 		goto err_media;
 	}
 
-	return ret;
+	return 0;
 
 #if !KERNEL_LACKS_ACTIVE_STATES
 err_ctrls:
@@ -2549,10 +2441,22 @@ static void vd55g1_subdev_cleanup(struct vd55g1 *sensor)
 	v4l2_ctrl_handler_free(sensor->sd.ctrl_handler);
 }
 
+static int vd55g1_get_regulators(struct vd55g1 *sensor)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(vd55g1_supply_name); i++)
+		sensor->supplies[i].supply = vd55g1_supply_name[i];
+
+	return devm_regulator_bulk_get(sensor->dev,
+				       ARRAY_SIZE(vd55g1_supply_name),
+				       sensor->supplies);
+}
+
 static int vd55g1_err_probe(struct device *dev, int ret, char *msg)
 {
 #if KERNEL_LACKS_DEV_ERR_PROBE
-	dev_err(dev, "%s", msg);
+	dev_err(dev, "%s\n", msg);
 	return ret;
 #else
 	return dev_err_probe(dev, ret, msg);
@@ -2568,24 +2472,24 @@ static int vd55g1_probe(struct i2c_client *client)
 	sensor = devm_kzalloc(dev, sizeof(*sensor), GFP_KERNEL);
 	if (!sensor)
 		return -ENOMEM;
+	sensor->dev = &client->dev;
 
 	v4l2_i2c_subdev_init(&sensor->sd, client, &vd55g1_subdev_ops);
-	sensor->i2c_client = client;
 
 	ret = vd55g1_parse_dt(sensor);
 	if (ret)
 		return vd55g1_err_probe(dev, ret,
-					"Failed to parse Device Tree.");
+					"Failed to parse Device Tree\n");
 
 	/* Get (and check) resources : power regs, ext clock, reset gpio */
 	ret = vd55g1_get_regulators(sensor);
 	if (ret)
-		return vd55g1_err_probe(dev, ret, "Failed to get regulators.");
+		return vd55g1_err_probe(dev, ret, "Failed to get regulators\n");
 
 	sensor->xclk = devm_clk_get(dev, NULL);
 	if (IS_ERR(sensor->xclk))
 		return vd55g1_err_probe(dev, PTR_ERR(sensor->xclk),
-					"Failed to get xclk.");
+					"Failed to get xclk\n");
 
 	sensor->xclk_freq = clk_get_rate(sensor->xclk);
 	ret = vd55g1_prepare_clock_tree(sensor);
@@ -2596,7 +2500,7 @@ static int vd55g1_probe(struct i2c_client *client)
 						     GPIOD_OUT_HIGH);
 	if (IS_ERR(sensor->reset_gpio))
 		return vd55g1_err_probe(dev, PTR_ERR(sensor->reset_gpio),
-					"Failed to get reset gpio.");
+					"Failed to get reset gpio\n");
 
 #if KERNEL_LACKS_CCI
 	sensor->regmap = devm_regmap_init_i2c(client, &vd55g1_regmap_config);
@@ -2605,7 +2509,7 @@ static int vd55g1_probe(struct i2c_client *client)
 #endif
 	if (IS_ERR(sensor->regmap))
 		return vd55g1_err_probe(dev, PTR_ERR(sensor->regmap),
-					"Failed to init regmap.");
+					"Failed to init regmap\n");
 
 	/* Detect if sensor is present and if its revision is supported */
 	ret = vd55g1_power_on(dev);
@@ -2619,16 +2523,17 @@ static int vd55g1_probe(struct i2c_client *client)
 	pm_runtime_set_autosuspend_delay(dev, 4000);
 	pm_runtime_use_autosuspend(dev);
 	pm_runtime_mark_last_busy(dev);
+	pm_runtime_put_autosuspend(dev);
 
 	ret = vd55g1_subdev_init(sensor);
 	if (ret) {
-		dev_err(dev, "V4l2 init failed : %d", ret);
+		dev_err(dev, "V4l2 init failed: %d\n", ret);
 		goto err_power_off;
 	}
 
 	ret = v4l2_async_register_subdev(&sensor->sd);
 	if (ret) {
-		dev_err(dev, "async subdev register failed %d", ret);
+		dev_err(dev, "async subdev register failed %d\n", ret);
 		goto err_subdev;
 	}
 
@@ -2639,6 +2544,7 @@ err_subdev:
 err_power_off:
 	pm_runtime_disable(dev);
 	pm_runtime_put_noidle(dev);
+	pm_runtime_dont_use_autosuspend(dev);
 	vd55g1_power_off(dev);
 
 	return ret;
