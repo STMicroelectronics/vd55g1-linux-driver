@@ -2242,7 +2242,7 @@ static int vd55g1_parse_dt_gpios_array(struct vd55g1 *sensor,
 	int ret;
 
 #if KERNEL_VERSION(5, 3, 0) > LINUX_VERSION_CODE
-	*nb = device_property_read_u32_array(&sensor->dev, prop_name, NULL, 0);
+	*nb = device_property_read_u32_array(sensor->dev, prop_name, NULL, 0);
 #else
 	*nb = device_property_count_u32(sensor->dev, prop_name);
 #endif
@@ -2341,9 +2341,10 @@ static int vd55g1_parse_dt(struct vd55g1 *sensor)
 	int ret;
 
 #if KERNEL_VERSION(5, 2, 0) > LINUX_VERSION_CODE
-	endpoint =
-		fwnode_graph_get_next_endpoint(of_fwnode_handle(dev->of_node),
-					       NULL);
+	struct device_node *of_node = sensor->dev->of_node;
+
+	endpoint = fwnode_graph_get_next_endpoint(of_fwnode_handle(of_node),
+						  NULL);
 #else
 	endpoint = fwnode_graph_get_endpoint_by_id(dev_fwnode(sensor->dev),
 						   0, 0, 0);
