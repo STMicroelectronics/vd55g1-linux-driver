@@ -1292,8 +1292,6 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 	if (ret < 0)
 		return ret;
 
-	vd55g1_write(sensor, VD55G1_REG_EXT_CLOCK, sensor->xclk_freq, &ret);
-
 	/* Configure output */
 	vd55g1_write(sensor, VD55G1_REG_MIPI_DATA_RATE,
 		     sensor->mipi_rate, &ret);
@@ -2131,6 +2129,9 @@ static int vd55g1_power_on(struct device *dev)
 		dev_err(dev, "Sensor detect failed %d\n", ret);
 		goto disable_clock;
 	}
+
+	/* Setup clock now to advance through system FSM states */
+	vd55g1_write(sensor, VD55G1_REG_EXT_CLOCK, sensor->xclk_freq, &ret);
 
 	ret = vd55g1_patch(sensor);
 	if (ret) {
