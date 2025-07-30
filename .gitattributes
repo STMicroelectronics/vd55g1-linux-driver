@@ -5,6 +5,5 @@ Jenkinsfile export-ignore
 debian export-ignore
 dts/rpi1_to_4/pcb1637*.dts  export-ignore
 dts/rpi1_to_4/pcb1718*.dts  export-ignore
-dts/rpi1_to_4/pcb*_v4l2.dts  export-ignore
 dts/rpi5/pcb1637*.dts  export-ignore
 dts/rpi5/pcb1718*.dts  export-ignore
