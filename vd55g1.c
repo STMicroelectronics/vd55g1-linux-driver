@@ -559,7 +559,7 @@ static const u32 vd55g1_mbus_formats_mono[] = {
 };
 
 /* Format order is : no flip, hflip, vflip, both */
-static const u32 vd55g1_mbus_formats_bayer[][5] = {
+static const u32 vd55g1_mbus_formats_bayer[][4] = {
 	{
 		MEDIA_BUS_FMT_SRGGB8_1X8,
 		MEDIA_BUS_FMT_SGRBG8_1X8,
@@ -734,6 +734,9 @@ static u32 vd55g1_get_fmt_code(struct vd55g1 *sensor, u32 code)
 				goto adapt_bayer_pattern;
 		}
 	}
+	dev_warn(sensor->dev, "Unsupported mbus format\n");
+
+	return code;
 
 adapt_bayer_pattern:
 	j = 0;
