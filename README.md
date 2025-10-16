@@ -39,3 +39,17 @@ echo "dtoverlay=<device-tree>" | sudo tee -a /boot/firmware/config.txt
 ```
 
 Finally, run `sudo reboot` to test your changes.
+
+### Run Auto Wake Up mode
+
+The VD55G1 can autonomously detect a change in the scene and trigger a decision to the host. This special mode is called Auto Wake Up (awu).
+
+You can enable this mode via v4l2-ctl.
+```
+v4l2-ctl -d /dev/v4l-subdev2 -c auto_wake_up=1
+```
+
+During the detection phase of the mode, no frame is sent by the sensor. To avoid libcamera repeatedly throwing timeout errors, you need to use the file awu_avoid_timeout.yaml
+```
+LIBCAMERA_RPI_CONFIG_FILE=awu_avoid_timeout.yaml rpicam-hello --timeout 0
+```
