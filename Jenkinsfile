@@ -33,7 +33,7 @@ pipeline {
 		stage('Build') {
 			steps {
 				dir('pristine') {
-					sh 'make KVERSION=$(ls /lib/modules/)'
+					sh 'make KDIR=/lib/modules/$(ls /lib/modules/)/build'
 				}
 			}
 		}
