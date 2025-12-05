@@ -1,0 +1,11 @@
+fragment@100 {
+	target = <&imx335>;
+	__overlay__ {
+		status = "disabled";
+		port {
+			endpoint {
+				remote-endpoint = <&imx335_ep>;
+			};
+		};
+	};
+};

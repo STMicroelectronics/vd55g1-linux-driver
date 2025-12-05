@@ -1,13 +1,12 @@
-ifneq ($(KERNELRELEASE),)
-include Kbuild
+KDIR ?= /lib/modules/`uname -r`/build
+KERNEL_SRC ?= $(KDIR)
+SRC := $(shell pwd)
 
-else
-KVERSION ?= `uname -r`
-KDIR ?= /lib/modules/${KVERSION}/build
-default:
-	CONFIG_DRIVER_VD55G1=m $(MAKE) -C $(KDIR) M=$$PWD
+all:
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC)
+
+modules_install:
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC) modules_install
 
 clean:
-	CONFIG_DRIVER_VD55G1=m $(MAKE) -C $(KDIR) M=$$PWD clean
-
-endif
+	$(MAKE) -C $(KERNEL_SRC) M=$(SRC) clean

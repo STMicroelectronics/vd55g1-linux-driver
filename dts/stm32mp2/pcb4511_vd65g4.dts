@@ -1,0 +1,65 @@
+/dts-v1/;
+/plugin/;
+
+/{
+	compatible = "st,stm32mp215-dk";
+
+        /include/ "disable_imx335.dtsi"
+
+	fragment@0 {
+		target = <&i2c2>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			vd65g4: camera@10 {
+				compatible = "st,vd65g4";
+				reg = <0x10>;
+
+				clocks = <&clk_ext_camera>;
+				clock-names = "xclk";
+
+				reset-gpios = <&gpiob 1 1>; /* GPIO_ACTIVE_LOW | GPIO_PUSH_PULL */
+				orientation = <0>;
+				rotation = <2>;
+
+				st,leds = <2>;
+
+				port {
+					vd65g4_ep: endpoint {
+						clock-lanes = <0>;
+						data-lanes = <1>;
+						remote-endpoint = <&csi_sink>;
+						clock-noncontinuous;
+						link-frequencies =
+							/bits/ 64 <600000000>;
+						lane-polarities = <1 1>;
+					};
+				};
+			};
+		};
+	};
+
+	fragment@1 {
+		target = <&csi>;
+		__overlay__ {
+			ports {
+				port@0 {
+					csi_sink: endpoint {
+						remote-endpoint = <&vd65g4_ep>;
+					};
+				};
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&gpiob>;
+		__overlay__ {
+			camera_power-hog {
+				gpio-hog;
+				gpios = <11 1>;
+				output-low;
+			};
+		};
+	};
+};

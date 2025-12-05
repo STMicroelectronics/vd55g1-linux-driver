@@ -1,0 +1,9 @@
+{
+    "version": 1.0,
+    "target": "pisp",
+
+    "pipeline_handler":
+    {
+        "camera_timeout_value_ms":100000000,
+    }
+}

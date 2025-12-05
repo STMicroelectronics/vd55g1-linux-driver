@@ -106,12 +106,14 @@
 #define VD55G1_SYSTEM_FSM_READY_TO_BOOT			0x01
 #define VD55G1_SYSTEM_FSM_SW_STBY			0x02
 #define VD55G1_SYSTEM_FSM_STREAMING			0x03
+#define VD55G1_SYSTEM_FSM_AWU_STREAMING			0x04
 #define VD55G1_REG_TEMPERATURE				CCI_REG16_LE(0x003c)
 #define VD55G1_REG_BOOT					CCI_REG8(0x0200)
 #define VD55G1_BOOT_BOOT				1
 #define VD55G1_BOOT_PATCH_AND_BOOT			2
 #define VD55G1_REG_STBY					CCI_REG8(0x0201)
 #define VD55G1_STBY_START_STREAM			1
+#define VD55G1_STBY_START_AWU				8
 #define VD55G1_STBY_THSENS_READ				4
 #define VD55G1_REG_STREAMING				CCI_REG8(0x0202)
 #define VD55G1_STREAMING_STOP_STREAM			1
@@ -137,7 +139,7 @@
 #define VD55G1_REG_READOUT_CTRL				CCI_REG8(0x052e)
 #define VD55G1_READOUT_CTRL_BIN_MODE_NORMAL		0
 #define VD55G1_READOUT_CTRL_BIN_MODE_DIGITAL_X2		1
-#define VD55G1_REG_DUSTER_CTRL				CCI_REG8(0x03ea)
+#define VD55G1_REG_DUSTER_CTRL				CCI_REG8(0x03ae)
 #define VD55G1_DUSTER_ENABLE				BIT(0)
 #define VD55G1_DUSTER_DISABLE				0
 #define VD55G1_DUSTER_DYN_ENABLE			BIT(1)
@@ -148,6 +150,7 @@
 #define VD55G1_REG_NEXT_CTX				CCI_REG16_LE(0x03e4)
 #define VD55G1_REG_EXPOSURE_USE_CASES			CCI_REG8(0x0312)
 #define VD55G1_EXPOSURE_USE_CASES_MULTI_CONTEXT		BIT(2)
+#define VD55G1_REG_AWU_DETECTION_THRESHOLD		CCI_REG16_LE(0x0370)
 #define VD55G1_REG_EXPOSURE_MAX_COARSE			CCI_REG16_LE(0x0372)
 #define VD55G1_EXPOSURE_MAX_COARSE_DEF			0x7fff
 #define VD55G1_EXPOSURE_MAX_COARSE_SUB			446
@@ -202,6 +205,7 @@
 #define VD55G1_FRAME_LENGTH_DEF				1860 /* 60 fps */
 #define VD55G1_MIPI_MARGIN				900
 #define VD55G1_CTX_OFFSET				0x50
+#define VD55G1_AWU_CTX					3
 #define VD55G1_FWPATCH_REVISION_MAJOR			2
 #define VD55G1_FWPATCH_REVISION_MINOR			9
 #define VD55G1_XCLK_FREQ_MIN				(6 * HZ_PER_MHZ)
@@ -212,6 +216,8 @@
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
 #define V4L2_CID_SLAVE_MODE			(V4L2_CID_USER_BASE | 0x1022)
+#define V4L2_AWU_CTRL				(V4L2_CID_USER_BASE | 0x1023)
+#define V4L2_AWU_THRESHOLD_CTRL			(V4L2_CID_USER_BASE | 0x1024)
 #if KERNEL_LACKS_HDR_CTRL
 #define V4L2_CID_HDR_SENSOR_MODE		(V4L2_CID_USER_BASE | 0x1004)
 #endif
@@ -559,7 +565,7 @@ static const u32 vd55g1_mbus_formats_mono[] = {
 };
 
 /* Format order is : no flip, hflip, vflip, both */
-static const u32 vd55g1_mbus_formats_bayer[][5] = {
+static const u32 vd55g1_mbus_formats_bayer[][4] = {
 	{
 		MEDIA_BUS_FMT_SRGGB8_1X8,
 		MEDIA_BUS_FMT_SGRBG8_1X8,
@@ -658,7 +664,10 @@ struct vd55g1 {
 	struct v4l2_ctrl *slave_ctrl;
 	struct v4l2_ctrl *led_ctrl;
 	struct v4l2_ctrl *hdr_ctrl;
+	struct v4l2_ctrl *awu_ctrl;
+	struct v4l2_ctrl *awu_threshold_ctrl;
 	bool streaming;
+	bool awu_enable;
 #if KERNEL_LACKS_ACTIVE_STATES
 	/* Mutex for serialized access */
 	struct mutex lock;
@@ -734,6 +743,9 @@ static u32 vd55g1_get_fmt_code(struct vd55g1 *sensor, u32 code)
 				goto adapt_bayer_pattern;
 		}
 	}
+	dev_warn(sensor->dev, "Unsupported mbus format\n");
+
+	return code;
 
 adapt_bayer_pattern:
 	j = 0;
@@ -1259,6 +1271,14 @@ static int vd55g1_set_framefmt(struct vd55g1 *sensor,
 	vd55g1_write(sensor, VD55G1_REG_Y_START(1), crop->top, &ret);
 	vd55g1_write(sensor, VD55G1_REG_Y_HEIGHT(1), crop->height, &ret);
 
+	vd55g1_write(sensor, VD55G1_REG_X_START(VD55G1_AWU_CTX),
+		     crop->left, &ret);
+	vd55g1_write(sensor, VD55G1_REG_X_WIDTH(VD55G1_AWU_CTX),
+		     crop->width, &ret);
+	vd55g1_write(sensor, VD55G1_REG_Y_START(VD55G1_AWU_CTX),
+		     crop->top, &ret);
+	vd55g1_write(sensor, VD55G1_REG_Y_HEIGHT(VD55G1_AWU_CTX),
+		     crop->height, &ret);
 	return ret;
 }
 
@@ -1379,9 +1399,21 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 		goto err_rpm_put;
 
 	/* Start streaming */
-	vd55g1_write(sensor, VD55G1_REG_STBY, VD55G1_STBY_START_STREAM, &ret);
-	vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, &ret);
-	vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_STREAMING, &ret);
+	if (sensor->awu_enable) {
+		vd55g1_write(sensor,
+			     VD55G1_REG_MASK_FRAME_CTRL(VD55G1_AWU_CTX),
+			     1, &ret);
+		vd55g1_write(sensor, VD55G1_REG_STBY, VD55G1_STBY_START_AWU,
+			     &ret);
+		vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_AWU_STREAMING,
+				  &ret);
+	} else {
+		vd55g1_write(sensor, VD55G1_REG_STBY, VD55G1_STBY_START_STREAM,
+			     &ret);
+		vd55g1_poll_reg(sensor, VD55G1_REG_STBY, 0, &ret);
+		vd55g1_wait_state(sensor, VD55G1_SYSTEM_FSM_STREAMING, &ret);
+	}
+
 	if (ret)
 		goto err_rpm_put;
 
@@ -1953,6 +1985,13 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_HDR_SENSOR_MODE:
 		ret = vd55g1_update_hdr_mode(sensor);
 		break;
+	case V4L2_AWU_CTRL:
+		sensor->awu_enable = ctrl->val;
+		break;
+	case V4L2_AWU_THRESHOLD_CTRL:
+		vd55g1_write(sensor, VD55G1_REG_AWU_DETECTION_THRESHOLD,
+			     ctrl->val << 8, &ret);
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -1999,6 +2038,28 @@ static const struct v4l2_ctrl_config vd55g1_slave_ctrl = {
 	.max		= 1,
 	.step		= 1,
 	.def		= 1,
+};
+
+static const struct v4l2_ctrl_config vd55g1_awu_ctrl = {
+	.ops		= &vd55g1_ctrl_ops,
+	.id		= V4L2_AWU_CTRL,
+	.name		= "Auto Wake Up",
+	.type		= V4L2_CTRL_TYPE_BOOLEAN,
+	.min		= 0,
+	.max		= 1,
+	.step		= 1,
+	.def		= 0,
+};
+
+static const struct v4l2_ctrl_config vd55g1_awu_threshold_ctrl = {
+	.ops		= &vd55g1_ctrl_ops,
+	.id		= V4L2_AWU_THRESHOLD_CTRL,
+	.name		= "Auto Wake Up Threshold",
+	.type		= V4L2_CTRL_TYPE_INTEGER,
+	.min		= 0,
+	.max		= 255,
+	.step		= 1,
+	.def		= 6,
 };
 
 #if KERNEL_LACKS_HDR_CTRL
@@ -2083,6 +2144,10 @@ static int vd55g1_init_ctrls(struct vd55g1 *sensor)
 					     0, vd55g1_tp_menu);
 	ctrl = v4l2_ctrl_new_int_menu(hdl, ops, V4L2_CID_LINK_FREQ,
 				      0, 0, &sensor->link_freq);
+	sensor->awu_ctrl = v4l2_ctrl_new_custom(hdl,
+						&vd55g1_awu_ctrl, NULL);
+	sensor->awu_threshold_ctrl =
+		v4l2_ctrl_new_custom(hdl, &vd55g1_awu_threshold_ctrl, NULL);
 	if (ctrl)
 		ctrl->flags |= V4L2_CTRL_FLAG_READ_ONLY;
 	sensor->pixel_rate_ctrl = v4l2_ctrl_new_std(hdl, ops,
