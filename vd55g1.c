@@ -17,7 +17,7 @@
 	(KERNEL_VERSION(6, 3, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_HDR_CTRL \
 	(KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE)
-#define KERNEL_LACKS_REMOVE_INT_RETURN \
+#define KERNEL_LACKS_REMOVE_VOID_RETURN \
 	(KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_ACTIVE_STATES \
 	(KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE)
@@ -2710,7 +2710,7 @@ err_power_off:
 	return ret;
 }
 
-#if KERNEL_LACKS_REMOVE_INT_RETURN
+#if KERNEL_LACKS_REMOVE_VOID_RETURN
 static int vd55g1_remove(struct i2c_client *client)
 #else
 static void vd55g1_remove(struct i2c_client *client)
@@ -2726,7 +2726,7 @@ static void vd55g1_remove(struct i2c_client *client)
 		vd55g1_power_off(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
 	pm_runtime_dont_use_autosuspend(&client->dev);
-#if KERNEL_LACKS_REMOVE_INT_RETURN
+#if KERNEL_LACKS_REMOVE_VOID_RETURN
 	return 0;
 #endif
 }
