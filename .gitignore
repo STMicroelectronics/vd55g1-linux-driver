@@ -4,6 +4,8 @@ vd55g1.*
 Module.symvers
 built-in.a
 modules.order
+*.dtb
+*.dtbo
 
 # Debian package build output
 # Ignore
