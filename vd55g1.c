@@ -216,8 +216,8 @@
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
 #define V4L2_CID_SLAVE_MODE			(V4L2_CID_USER_BASE | 0x1022)
-#define V4L2_AWU_CTRL				(V4L2_CID_USER_BASE | 0x1023)
-#define V4L2_AWU_THRESHOLD_CTRL			(V4L2_CID_USER_BASE | 0x1024)
+#define V4L2_CID_AWU_CTRL			(V4L2_CID_USER_BASE | 0x1023)
+#define V4L2_CID_AWU_THRESHOLD_CTRL		(V4L2_CID_USER_BASE | 0x1024)
 #if KERNEL_LACKS_HDR_CTRL
 #define V4L2_CID_HDR_SENSOR_MODE		(V4L2_CID_USER_BASE | 0x1004)
 #endif
@@ -1985,10 +1985,10 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_HDR_SENSOR_MODE:
 		ret = vd55g1_update_hdr_mode(sensor);
 		break;
-	case V4L2_AWU_CTRL:
+	case V4L2_CID_AWU_CTRL:
 		sensor->awu_enable = ctrl->val;
 		break;
-	case V4L2_AWU_THRESHOLD_CTRL:
+	case V4L2_CID_AWU_THRESHOLD_CTRL:
 		vd55g1_write(sensor, VD55G1_REG_AWU_DETECTION_THRESHOLD,
 			     ctrl->val << 8, &ret);
 		break;
@@ -2042,7 +2042,7 @@ static const struct v4l2_ctrl_config vd55g1_slave_ctrl = {
 
 static const struct v4l2_ctrl_config vd55g1_awu_ctrl = {
 	.ops		= &vd55g1_ctrl_ops,
-	.id		= V4L2_AWU_CTRL,
+	.id		= V4L2_CID_AWU_CTRL,
 	.name		= "Auto Wake Up",
 	.type		= V4L2_CTRL_TYPE_BOOLEAN,
 	.min		= 0,
@@ -2053,7 +2053,7 @@ static const struct v4l2_ctrl_config vd55g1_awu_ctrl = {
 
 static const struct v4l2_ctrl_config vd55g1_awu_threshold_ctrl = {
 	.ops		= &vd55g1_ctrl_ops,
-	.id		= V4L2_AWU_THRESHOLD_CTRL,
+	.id		= V4L2_CID_AWU_THRESHOLD_CTRL,
 	.name		= "Auto Wake Up Threshold",
 	.type		= V4L2_CTRL_TYPE_INTEGER,
 	.min		= 0,
