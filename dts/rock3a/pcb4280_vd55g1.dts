@@ -1,0 +1,163 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/dts-v1/;
+/plugin/;
+
+/ {
+	metadata {
+		title = "Enable vd55g1 on rock3a";
+		compatible = "rockchip,rk3568";
+		category = "camera";
+		description = "Enable Radxa rock3a vd55g1";
+	};
+};
+
+&{/} {
+	camera_clk_12M: camera_clk_12M {
+		#clock-cells = <0>;
+		compatible = "fixed-clock";
+		clock-frequency = <12000000>;
+	};
+	vcc_camera: vcc-camera {
+		status = "okay";
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_camera";
+		gpio = <&gpio1 9 0>;
+		enable-active-high;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+};
+
+&i2c5 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	status = "okay";
+
+	vd55g1: vd55g1@10 {
+		status = "okay";
+		compatible = "st,vd55g1";
+		reg = <0x10>;
+
+		clocks = <&camera_clk_12M>;
+		clock-names = "xclk";
+
+		reset-gpios = <&gpio4 26 1>;
+
+		vcore-supply = <&vcc_camera>;
+		vddio-supply = <&vcc_camera>;
+		vana-supply = <&vcc_camera>;
+
+		rotation = <0>;
+		orientation = <2>;
+
+		port {
+			vd55g1_ep: endpoint {
+				clock-lanes = <0>;
+				data-lanes = <1>;
+				lane-polarities = <1 1>;
+				remote-endpoint = <&mipi_in_ucam2>;
+				clock-noncontinuous;
+				link-frequencies =
+					/bits/ 64 <500000000>;
+			};
+		};
+	};
+};
+
+&csi2_dphy_hw {
+	status = "okay";
+};
+
+&csi2_dphy0 {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			mipi_in_ucam2: endpoint@3 {
+				reg = <3>;
+				remote-endpoint = <&vd55g1_ep>;
+				data-lanes = <1>;
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			csidphy_out: endpoint@2 {
+				reg = <2>;
+				remote-endpoint = <&mipi_csi2_input>;
+				data-lanes = <1>;
+			};
+		};
+	};
+};
+
+&mipi_csi2 {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			mipi_csi2_input: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&csidphy_out>;
+				data-lanes = <1>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+
+			mipi_csi2_output: endpoint {
+				remote-endpoint = <&cif_mipi_in>;
+				data-lanes = <1>;
+			};
+		};
+	};
+};
+
+&rkcif_mipi_lvds {
+	status = "okay";
+	port {
+		cif_mipi_in: endpoint {
+			remote-endpoint = <&mipi_csi2_output>;
+			data-lanes = <1>;
+		};
+	};
+};
+
+&rkisp_vir0 {
+	status = "disabled";
+};
+
+&rkisp {
+	status = "disabled";
+};
+
+&rkisp_mmu {
+	status = "disabled";
+};
+
+&rkcif_mmu {
+	status = "okay";
+};
+
+&rkcif {
+	status = "okay";
+};
+
+
