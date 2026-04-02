@@ -1380,6 +1380,10 @@ static int vd55g1_enable_streams(struct v4l2_subdev *sd,
 	struct v4l2_rect *crop = &sensor->active_crop;
 	struct v4l2_mbus_framefmt *format = &sensor->active_fmt;
 #elif KERNEL_LACKS_NEW_STATES_API
+#if KERNEL_LACKS_STREAMS_API
+	struct v4l2_subdev_state *state =
+		v4l2_subdev_get_locked_active_state(&sensor->sd);
+#endif
 	struct v4l2_rect *crop =
 		v4l2_subdev_get_pad_crop(&sensor->sd, state, 0);
 	struct v4l2_mbus_framefmt *format =
