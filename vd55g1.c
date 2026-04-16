@@ -760,6 +760,13 @@ static unsigned int vd55g1_get_fmt_data_type(u32 code)
 	}
 }
 
+static u32 vd55g1_get_mbus_fmt(struct vd55g1 *sensor)
+{
+	if (sensor->version->color != VD55G1_COLOR_VERSION_BAYER)
+		return vd55g1_mbus_formats_mono[VD55G1_MBUS_CODE_IDX_DEF];
+	return vd55g1_mbus_formats_bayer[VD55G1_MBUS_CODE_IDX_DEF][0];
+}
+
 static u32 vd55g1_get_fmt_code(struct vd55g1 *sensor, u32 code)
 {
 	unsigned int i, j;
@@ -1778,7 +1785,6 @@ static int vd55g1_init_state(struct v4l2_subdev *sd,
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct v4l2_subdev_format fmt = { 0 };
-	int code;
 #if !KERNEL_LACKS_STREAMS_API
 	struct v4l2_subdev_route routes[] = {
 		{ .flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE }
@@ -1795,11 +1801,8 @@ static int vd55g1_init_state(struct v4l2_subdev *sd,
 		return ret;
 #endif
 
-	if (sensor->version->color != VD55G1_COLOR_VERSION_BAYER)
-		code = vd55g1_mbus_formats_mono[VD55G1_MBUS_CODE_IDX_DEF];
-	else
-		code = vd55g1_mbus_formats_bayer[VD55G1_MBUS_CODE_IDX_DEF][0];
-	fmt.format.code = vd55g1_get_fmt_code(sensor, code);
+	fmt.format.code = vd55g1_get_fmt_code(sensor,
+					      vd55g1_get_mbus_fmt(sensor));
 	fmt.format.width = vd55g1_supported_modes[VD55G1_MODE_IDX_DEF].width;
 	fmt.format.height = vd55g1_supported_modes[VD55G1_MODE_IDX_DEF].height;
 
@@ -2583,8 +2586,6 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 {
 	int ret;
 #if KERNEL_LACKS_ACTIVE_STATES
-	int code;
-
 	mutex_init(&sensor->lock);
 #endif
 
@@ -2605,13 +2606,10 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 
 	sensor->streaming = false;
 #if KERNEL_LACKS_ACTIVE_STATES
-	if (sensor->version->color != VD55G1_COLOR_VERSION_BAYER)
-		code = vd55g1_mbus_formats_mono[VD55G1_MBUS_CODE_IDX_DEF];
-	else
-		code = vd55g1_mbus_formats_bayer[VD55G1_MBUS_CODE_IDX_DEF][0];
 	vd55g1_update_pad_fmt(sensor,
 			      &vd55g1_supported_modes[VD55G1_MODE_IDX_DEF],
-			      vd55g1_get_fmt_code(sensor, code),
+			      vd55g1_get_fmt_code(sensor,
+						  vd55g1_get_mbus_fmt(sensor)),
 			      &sensor->active_fmt);
 	sensor->active_crop.width =
 		vd55g1_supported_modes[VD55G1_MODE_IDX_DEF].width;
