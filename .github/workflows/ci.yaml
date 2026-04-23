@@ -1,0 +1,68 @@
+name: CI
+# run-name is voluntary left empty to automatically use commit title
+on: [push]
+
+jobs:
+  Build:
+    runs-on: ubuntu22
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Setup dependencies
+        run: |
+          sudo apt update
+          sudo apt-get install linux-headers-generic python3-ply python3-git -y
+          # Running in docker we can't use 'uname -r', grab it manually
+          echo "KERNEL_VERSION=$(ls /lib/modules/ | sort --version-sort --reverse | head -n 1)" >> $GITHUB_ENV
+
+      - name: Check coding style
+        run: |
+          find -name "*.c" -not -name "*mod.c" -not -path "*debian*" -print0 | xargs -0 \
+            /usr/src/linux-headers-$KERNEL_VERSION/scripts/checkpatch.pl --no-tree --max-line-length=80 --strict --ignore=LINUX_VERSION_CODE --ignore=UNDOCUMENTED_DT_STRING -f
+
+      - name: Build kernel module
+        run: |
+          make KDIR=/lib/modules/$KERNEL_VERSION/build
+
+  Package:
+    needs: build
+    runs-on: ubuntu22
+    if: github.ref == 'refs/heads/debian'
+    env:
+      PRISTINE_PATH: pristine
+    defaults:
+      run:
+        # Use a subfolder as debian packaging tools output to '..'
+        working-directory: $PRISTINE_PATH
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          path: $PRISTINE_PATH
+
+      - name: Setup dependencies
+        run: |
+          sudo apt update
+          sudo apt-get install dkms equivs devscripts -y
+
+      - name: Build package
+        run: |
+          dpkg-buildpackage -us -uc -b
+          lintian || true
+
+      - name: Upload package
+        run: |
+          FILE=$(ls ../*.deb)
+          MD5_CHECKSUM=$(md5sum ${FILE} | awk '{ print $1 }')
+          SHA1_CHECKSUM=$(shasum ${FILE} | awk '{ print $1 }')
+          MODULE_NAME=$(echo ${FILE} | cut -d"-" -f1)
+
+          curl -f -s -S \
+            -u ${{ vars.APPLICATIVE_ACCOUNT_NAME }}:${{ secrets.APPLICATIVE_ACCOUNT_PASSWORD }} \
+            -T ${FILE} \
+            -H "X-Checksum-Sha1:${SHA1_CHECKSUM}" \
+            -H "X-Checksum-MD5:${MD5_CHECKSUM}" \
+            -XPUT "https://artifactory.st.com/artifactory/imgswlinux-debian-local/pool/${MODULE_NAME}-dkms/stable/$(basename $FILE);deb.distribution=stable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"

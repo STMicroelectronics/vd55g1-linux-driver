@@ -17,7 +17,7 @@
 	(KERNEL_VERSION(6, 3, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_HDR_CTRL \
 	(KERNEL_VERSION(6, 2, 0) > LINUX_VERSION_CODE)
-#define KERNEL_LACKS_REMOVE_INT_RETURN \
+#define KERNEL_LACKS_REMOVE_VOID_RETURN \
 	(KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_ACTIVE_STATES \
 	(KERNEL_VERSION(5, 19, 0) > LINUX_VERSION_CODE)
@@ -95,11 +95,7 @@
 
 /* Register Map */
 #define VD55G1_REG_MODEL_ID				CCI_REG32_LE(0x0000)
-#define VD55G1_MODEL_ID_VD55G1				0x53354731 /* Mono */
-#define VD55G1_MODEL_ID_VD65G4				0x53354733 /* RGB */
-#define VD55G1_REG_REVISION				CCI_REG16_LE(0x0004)
-#define VD55G1_REVISION_CCB				0x2020
-#define VD55G1_REVISION_BAYER				0x3030
+#define VD55G1_REG_COLOR_VERSION			CCI_REG32_LE(0x0670)
 #define VD55G1_REG_FWPATCH_REVISION			CCI_REG16_LE(0x0012)
 #define VD55G1_REG_FWPATCH_START_ADDR			CCI_REG8(0x2000)
 #define VD55G1_REG_SYSTEM_FSM				CCI_REG8(0x001c)
@@ -130,7 +126,10 @@
 #define VD55G1_PATGEN_ENABLE				BIT(0)
 #define VD55G1_REG_MANUAL_ANALOG_GAIN			CCI_REG8(0x0501)
 #define VD55G1_REG_MANUAL_COARSE_EXPOSURE		CCI_REG16_LE(0x0502)
-#define VD55G1_REG_MANUAL_DIGITAL_GAIN			CCI_REG16_LE(0x0504)
+#define VD55G1_REG_MANUAL_DIGITAL_GAIN_CH0		CCI_REG16_LE(0x0504)
+#define VD55G1_REG_MANUAL_DIGITAL_GAIN_CH1		CCI_REG16_LE(0x0506)
+#define VD55G1_REG_MANUAL_DIGITAL_GAIN_CH2		CCI_REG16_LE(0x0508)
+#define VD55G1_REG_MANUAL_DIGITAL_GAIN_CH3		CCI_REG16_LE(0x050a)
 #define VD55G1_REG_APPLIED_COARSE_EXPOSURE		CCI_REG16_LE(0x00e8)
 #define VD55G1_REG_APPLIED_ANALOG_GAIN			CCI_REG16_LE(0x00ea)
 #define VD55G1_REG_APPLIED_DIGITAL_GAIN			CCI_REG16_LE(0x00ec)
@@ -190,9 +189,9 @@
 
 #define VD55G1_WIDTH					804
 #define VD55G1_HEIGHT					704
-#define VD55G1_MODE_DEF					0
+#define VD55G1_MODE_IDX_DEF				0
 #define VD55G1_NB_GPIOS					4
-#define VD55G1_MBUS_CODE_DEF				0
+#define VD55G1_MBUS_CODE_IDX_DEF			0
 #define VD55G1_DARKCAL_PEDESTAL_DEF			0x40
 #define VD55G1_DGAIN_DEF				256
 #define VD55G1_AGAIN_DEF				19
@@ -216,14 +215,45 @@
 #define V4L2_CID_TEMPERATURE			(V4L2_CID_USER_BASE | 0x1020)
 #define V4L2_CID_DARKCAL_PEDESTAL		(V4L2_CID_USER_BASE | 0x1021)
 #define V4L2_CID_SLAVE_MODE			(V4L2_CID_USER_BASE | 0x1022)
-#define V4L2_AWU_CTRL				(V4L2_CID_USER_BASE | 0x1023)
-#define V4L2_AWU_THRESHOLD_CTRL			(V4L2_CID_USER_BASE | 0x1024)
+#define V4L2_CID_AWU_CTRL			(V4L2_CID_USER_BASE | 0x1023)
+#define V4L2_CID_AWU_THRESHOLD_CTRL		(V4L2_CID_USER_BASE | 0x1024)
 #if KERNEL_LACKS_HDR_CTRL
 #define V4L2_CID_HDR_SENSOR_MODE		(V4L2_CID_USER_BASE | 0x1004)
 #endif
 
-#define VD55G1_MODEL_ID_NAME(id) \
-	((id) == VD55G1_MODEL_ID_VD55G1 ? "vd55g1" : "vd65g4")
+enum vd55g1_model_id {
+	VD55G1_MODEL_ID_2 = 0x53354731,
+	VD55G1_MODEL_ID_3 = 0x53354733,
+};
+
+enum vd55g1_color_version {
+	VD55G1_COLOR_VERSION_MONO = 0x0,
+	VD55G1_COLOR_VERSION_BAYER = 0x1,
+};
+
+struct vd55g1_version {
+	char *name;
+	enum vd55g1_model_id id;
+	enum vd55g1_color_version color;
+};
+
+static const struct vd55g1_version vd55g1_versions[] = {
+	{
+		.name  = "vd55g1",
+		.id    = VD55G1_MODEL_ID_2,
+		.color = VD55G1_COLOR_VERSION_MONO,
+	},
+	{
+		.name  = "vd55g4",
+		.id    = VD55G1_MODEL_ID_3,
+		.color = VD55G1_COLOR_VERSION_MONO,
+	},
+	{
+		.name  = "vd65g4",
+		.id    = VD55G1_MODEL_ID_3,
+		.color = VD55G1_COLOR_VERSION_BAYER,
+	},
+};
 
 static const u8 vd55g1_patch_array[] = {
 	0x44, 0x03, 0x09, 0x02, 0xe6, 0x01, 0x42, 0x00, 0xea, 0x01, 0x42, 0x00,
@@ -628,7 +658,7 @@ struct vd55g1_vblank_limits {
 
 struct vd55g1 {
 	struct device *dev;
-	unsigned int id;
+	const struct vd55g1_version *version;
 	struct v4l2_subdev sd;
 	struct media_pad pad;
 	struct regulator_bulk_data supplies[ARRAY_SIZE(vd55g1_supply_name)];
@@ -734,7 +764,7 @@ static u32 vd55g1_get_fmt_code(struct vd55g1 *sensor, u32 code)
 {
 	unsigned int i, j;
 
-	if (sensor->id == VD55G1_MODEL_ID_VD55G1)
+	if (sensor->version->color != VD55G1_COLOR_VERSION_BAYER)
 		return code;
 
 	for (i = 0; i < ARRAY_SIZE(vd55g1_mbus_formats_bayer); i++) {
@@ -743,7 +773,7 @@ static u32 vd55g1_get_fmt_code(struct vd55g1 *sensor, u32 code)
 				goto adapt_bayer_pattern;
 		}
 	}
-	dev_warn(sensor->dev, "Unsupported mbus format\n");
+	dev_warn(sensor->dev, "Unsupported mbus format: 0x%x\n", code);
 
 	return code;
 
@@ -1044,9 +1074,16 @@ static int vd55g1_update_expo_cluster(struct vd55g1 *sensor, bool is_auto)
 		vd55g1_write(sensor, VD55G1_REG_MANUAL_ANALOG_GAIN,
 			     sensor->again_ctrl->val, &ret);
 
-	if (!is_auto && sensor->dgain_ctrl->is_new)
-		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN,
+	if (!is_auto && sensor->dgain_ctrl->is_new) {
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN_CH0,
 			     sensor->dgain_ctrl->val, &ret);
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN_CH1,
+			     sensor->dgain_ctrl->val, &ret);
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN_CH2,
+			     sensor->dgain_ctrl->val, &ret);
+		vd55g1_write(sensor, VD55G1_REG_MANUAL_DIGITAL_GAIN_CH3,
+			     sensor->dgain_ctrl->val, &ret);
+	}
 
 	return ret;
 }
@@ -1463,8 +1500,8 @@ static int vd55g1_patch(struct vd55g1 *sensor)
 	u64 patch;
 	int ret = 0;
 
-	/* vd55g1 needs a patch while vd65g4 does not */
-	if (sensor->id == VD55G1_MODEL_ID_VD55G1) {
+	/* Version 2 needs a patch while version 3 does not */
+	if (sensor->version->id == VD55G1_MODEL_ID_2) {
 		vd55g1_write_array(sensor, VD55G1_REG_FWPATCH_START_ADDR,
 				   sizeof(vd55g1_patch_array),
 				   vd55g1_patch_array, &ret);
@@ -1556,7 +1593,7 @@ static int vd55g1_enum_mbus_code(struct v4l2_subdev *sd,
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	u32 base_code;
 
-	if (sensor->id == VD55G1_MODEL_ID_VD55G1) {
+	if (sensor->version->color != VD55G1_COLOR_VERSION_BAYER) {
 		if (code->index >= ARRAY_SIZE(vd55g1_mbus_formats_mono))
 			return -EINVAL;
 		base_code = vd55g1_mbus_formats_mono[code->index];
@@ -1737,6 +1774,7 @@ static int vd55g1_init_state(struct v4l2_subdev *sd,
 {
 	struct vd55g1 *sensor = to_vd55g1(sd);
 	struct v4l2_subdev_format fmt = { 0 };
+	int code;
 #if !KERNEL_LACKS_STREAMS_API
 	struct v4l2_subdev_route routes[] = {
 		{ .flags = V4L2_SUBDEV_ROUTE_FL_ACTIVE }
@@ -1753,9 +1791,13 @@ static int vd55g1_init_state(struct v4l2_subdev *sd,
 		return ret;
 #endif
 
-	vd55g1_update_pad_fmt(sensor, &vd55g1_supported_modes[VD55G1_MODE_DEF],
-			      vd55g1_get_fmt_code(sensor, VD55G1_MBUS_CODE_DEF),
-			      &fmt.format);
+	if (sensor->version->color != VD55G1_COLOR_VERSION_BAYER)
+		code = vd55g1_mbus_formats_mono[VD55G1_MBUS_CODE_IDX_DEF];
+	else
+		code = vd55g1_mbus_formats_bayer[VD55G1_MBUS_CODE_IDX_DEF][0];
+	fmt.format.code = vd55g1_get_fmt_code(sensor, code);
+	fmt.format.width = vd55g1_supported_modes[VD55G1_MODE_IDX_DEF].width;
+	fmt.format.height = vd55g1_supported_modes[VD55G1_MODE_IDX_DEF].height;
 
 #if KERNEL_LACKS_SUBDEV_STATES
 	return vd55g1_set_pad_fmt(sd, cfg, &fmt);
@@ -1985,10 +2027,10 @@ static int vd55g1_s_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_HDR_SENSOR_MODE:
 		ret = vd55g1_update_hdr_mode(sensor);
 		break;
-	case V4L2_AWU_CTRL:
+	case V4L2_CID_AWU_CTRL:
 		sensor->awu_enable = ctrl->val;
 		break;
-	case V4L2_AWU_THRESHOLD_CTRL:
+	case V4L2_CID_AWU_THRESHOLD_CTRL:
 		vd55g1_write(sensor, VD55G1_REG_AWU_DETECTION_THRESHOLD,
 			     ctrl->val << 8, &ret);
 		break;
@@ -2042,7 +2084,7 @@ static const struct v4l2_ctrl_config vd55g1_slave_ctrl = {
 
 static const struct v4l2_ctrl_config vd55g1_awu_ctrl = {
 	.ops		= &vd55g1_ctrl_ops,
-	.id		= V4L2_AWU_CTRL,
+	.id		= V4L2_CID_AWU_CTRL,
 	.name		= "Auto Wake Up",
 	.type		= V4L2_CTRL_TYPE_BOOLEAN,
 	.min		= 0,
@@ -2053,7 +2095,7 @@ static const struct v4l2_ctrl_config vd55g1_awu_ctrl = {
 
 static const struct v4l2_ctrl_config vd55g1_awu_threshold_ctrl = {
 	.ops		= &vd55g1_ctrl_ops,
-	.id		= V4L2_AWU_THRESHOLD_CTRL,
+	.id		= V4L2_CID_AWU_THRESHOLD_CTRL,
 	.name		= "Auto Wake Up Threshold",
 	.type		= V4L2_CTRL_TYPE_INTEGER,
 	.min		= 0,
@@ -2228,38 +2270,48 @@ unlock_state:
 	return ret;
 }
 
+static const struct vd55g1_version *
+	vd55g1_get_version(enum vd55g1_model_id id,
+			   enum vd55g1_color_version color)
+{
+	unsigned int i;
+
+	for (i = 0; i < ARRAY_SIZE(vd55g1_versions); i++) {
+		if (vd55g1_versions[i].id == id &&
+		    vd55g1_versions[i].color == color)
+			return &vd55g1_versions[i];
+	}
+
+	return NULL;
+}
+
 static int vd55g1_detect(struct vd55g1 *sensor)
 {
-	unsigned int dt_id = (uintptr_t)device_get_match_data(sensor->dev);
-	u64 rev, id;
-	int ret;
+	const struct vd55g1_version *dt_version =
+		device_get_match_data(sensor->dev);
+	const struct vd55g1_version *version;
+	u64 color, id;
+	int ret = 0;
 
-	ret = vd55g1_read(sensor, VD55G1_REG_MODEL_ID, &id, NULL);
+	vd55g1_read(sensor, VD55G1_REG_MODEL_ID, &id, &ret);
+	vd55g1_read(sensor, VD55G1_REG_COLOR_VERSION, &color, &ret);
 	if (ret)
 		return ret;
 
-	if (id != VD55G1_MODEL_ID_VD55G1 && id != VD55G1_MODEL_ID_VD65G4) {
-		dev_warn(sensor->dev, "Unsupported sensor id 0x%x\n",
-			 (u32)id);
+	version = vd55g1_get_version(id, color);
+	if (!version) {
+		dev_warn(sensor->dev, "Unsupported sensor version, expected %s\n",
+			 dt_version->name);
 		return -ENODEV;
 	}
-	if (id != dt_id) {
-		dev_err(sensor->dev, "Probed sensor %s and device tree definition (%s) mismatch",
-			VD55G1_MODEL_ID_NAME(id), VD55G1_MODEL_ID_NAME(dt_id));
+	if (version->id != dt_version->id ||
+	    version->color != dt_version->color) {
+		dev_err(sensor->dev, "Probed sensor version %s and device tree definition %s mismatch",
+			version->name, dt_version->name);
 		return -ENODEV;
 	}
-	sensor->id = id;
 
-	ret = vd55g1_read(sensor, VD55G1_REG_REVISION, &rev, NULL);
-	if (ret)
-		return ret;
-
-	if ((id == VD55G1_MODEL_ID_VD55G1 && rev != VD55G1_REVISION_CCB) &&
-	    (id == VD55G1_MODEL_ID_VD65G4 && rev != VD55G1_REVISION_BAYER)) {
-		dev_err(sensor->dev, "Unsupported sensor revision 0x%x for sensor %s\n",
-			(u16)rev, VD55G1_MODEL_ID_NAME(id));
-		return -ENODEV;
-	}
+	sensor->version = version;
 
 	return 0;
 }
@@ -2526,8 +2578,9 @@ static int vd55g1_parse_dt(struct vd55g1 *sensor)
 static int vd55g1_subdev_init(struct vd55g1 *sensor)
 {
 	int ret;
-
 #if KERNEL_LACKS_ACTIVE_STATES
+	int code;
+
 	mutex_init(&sensor->lock);
 #endif
 
@@ -2548,13 +2601,18 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 
 	sensor->streaming = false;
 #if KERNEL_LACKS_ACTIVE_STATES
-	vd55g1_update_pad_fmt(sensor, &vd55g1_supported_modes[VD55G1_MODE_DEF],
-			      vd55g1_get_fmt_code(sensor, VD55G1_MBUS_CODE_DEF),
+	if (sensor->version->color != VD55G1_COLOR_VERSION_BAYER)
+		code = vd55g1_mbus_formats_mono[VD55G1_MBUS_CODE_IDX_DEF];
+	else
+		code = vd55g1_mbus_formats_bayer[VD55G1_MBUS_CODE_IDX_DEF][0];
+	vd55g1_update_pad_fmt(sensor,
+			      &vd55g1_supported_modes[VD55G1_MODE_IDX_DEF],
+			      vd55g1_get_fmt_code(sensor, code),
 			      &sensor->active_fmt);
 	sensor->active_crop.width =
-		vd55g1_supported_modes[VD55G1_MODE_DEF].width;
+		vd55g1_supported_modes[VD55G1_MODE_IDX_DEF].width;
 	sensor->active_crop.height =
-		vd55g1_supported_modes[VD55G1_MODE_DEF].height;
+		vd55g1_supported_modes[VD55G1_MODE_IDX_DEF].height;
 	sensor->active_crop.left = 0;
 	sensor->active_crop.top = 0;
 #else
@@ -2710,7 +2768,7 @@ err_power_off:
 	return ret;
 }
 
-#if KERNEL_LACKS_REMOVE_INT_RETURN
+#if KERNEL_LACKS_REMOVE_VOID_RETURN
 static int vd55g1_remove(struct i2c_client *client)
 #else
 static void vd55g1_remove(struct i2c_client *client)
@@ -2726,14 +2784,15 @@ static void vd55g1_remove(struct i2c_client *client)
 		vd55g1_power_off(&client->dev);
 	pm_runtime_set_suspended(&client->dev);
 	pm_runtime_dont_use_autosuspend(&client->dev);
-#if KERNEL_LACKS_REMOVE_INT_RETURN
+#if KERNEL_LACKS_REMOVE_VOID_RETURN
 	return 0;
 #endif
 }
 
 static const struct of_device_id vd55g1_dt_ids[] = {
-	{ .compatible = "st,vd55g1", .data = (void *)VD55G1_MODEL_ID_VD55G1 },
-	{ .compatible = "st,vd65g4", .data = (void *)VD55G1_MODEL_ID_VD65G4 },
+	{ .compatible = "st,vd55g1", .data = (void *)&vd55g1_versions[0] },
+	{ .compatible = "st,vd55g4", .data = (void *)&vd55g1_versions[1] },
+	{ .compatible = "st,vd65g4", .data = (void *)&vd55g1_versions[2] },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, vd55g1_dt_ids);

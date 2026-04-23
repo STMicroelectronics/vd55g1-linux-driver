@@ -1,108 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0-only
+// Definitions for VD55G1 camera module on VC I2C bus
+
 /dts-v1/;
 /plugin/;
+
+/include/ "vd55g1_vd65g4-overlay.dtsi"
 
 /{
 	compatible = "brcm,bcm2835";
 
-	fragment@0 {
-		target = <&i2c0if>;
+	// Fragment numbers deliberately high to avoid conflicts with the
+	// included vd55g1_vd65g4 overlay file.
+
+	fragment@101 {
+		target = <&cam_node>;
 		__overlay__ {
-			status = "okay";
+			compatible = "st,vd55g1";
 		};
 	};
-
-	clk_frag: fragment@1 {
-		target = <&cam1_clk>;
-		__overlay__ {
-			status = "okay";
-			clock-frequency = <12000000>;
-		};
-	};
-
-	fragment@2 {
-		target = <&i2c0mux>;
-		__overlay__ {
-			status = "okay";
-		};
-	};
-
-	i2c_frag: fragment@100 {
-		target = <&i2c_csi_dsi>;
-		__overlay__ {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			status = "okay";
-
-			cam_node: vd55g1@10 {
-				compatible = "st,vd55g1";
-				reg = <0x10>;
-				status = "disabled";
-
-				clocks = <&cam1_clk>;
-				clock-names = "xclk";
-
-				vana-supply = <&cam1_reg>;	/* 2.8v */
-				vddio-supply = <&cam_dummy_reg>;	/* 1.8v */
-				vcore-supply = <&cam_dummy_reg>;	/* 1.2v */
-
-				rotation = <0>;
-				orientation = <2>;
-
-				st,leds = <2>;
-
-				port {
-					cam_endpoint: endpoint {
-						clock-lanes = <0>;
-						data-lanes = <1>;
-						clock-noncontinuous;
-						link-frequencies =
-							/bits/ 64 <600000000>;
-					};
-				};
-			};
-		};
-	};
-
-	csi_frag: fragment@101 {
-		target = <&csi1>;
-		csi: __overlay__ {
-			status = "okay";
-
-			port {
-				csi_ep: endpoint {
-					remote-endpoint = <&cam_endpoint>;
-					clock-lanes = <0>;
-					data-lanes = <1>;
-					clock-noncontinuous;
-				};
-			};
-		};
-	};
-
-	fragment@102 {
-		target = <&csi1>;
-		__dormant__ {
-			compatible = "brcm,bcm2835-unicam-legacy";
-		};
-	};
-
-	__overrides__ {
-		rotation = <&cam_node>,"rotation:0";
-		orientation = <&cam_node>,"orientation:0";
-		media-controller = <0>,"!102";
-		cam0 = <&i2c_frag>, "target:0=",<&i2c_csi_dsi0>,
-		       <&csi_frag>, "target:0=",<&csi0>,
-		       <&clk_frag>, "target:0=",<&cam0_clk>,
-		       <&cam_node>, "clocks:0=",<&cam0_clk>,
-		       <&cam_node>, "vana-supply:0=",<&cam0_reg>;
-	};
-};
-
-&cam_node {
-	status = "okay";
-};
-
-&cam_endpoint {
-	remote-endpoint = <&csi_ep>;
 };
