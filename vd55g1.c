@@ -31,6 +31,10 @@
 	(KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE)
 #define KERNEL_LACKS_NEW_EP_ALLOC \
 	(KERNEL_VERSION(4, 20, 0) > LINUX_VERSION_CODE)
+#if defined(CONFIG_VIDEO_ROCKCHIP_CIF) && \
+	(KERNEL_VERSION(5, 7, 0) > LINUX_VERSION_CODE)
+#define KERNEL_HAS_G_FRAME_INTERVAL 1
+#endif
 
 #include <linux/clk.h>
 #include <linux/delay.h>
@@ -1876,11 +1880,50 @@ static const struct v4l2_subdev_pad_ops vd55g1_pad_ops = {
 #endif
 };
 
+/*
+ * Required by Rockchip CIF driver which calls g_frame_interval on the source
+ * subdev during open. Per spec: frame_rate = 1 / (line_time * FRAME_LENGTH),
+ * with line_time = LINE_LENGTH / pixel_clock, FRAME_LENGTH = height + vblank.
+ */
+#ifdef KERNEL_HAS_G_FRAME_INTERVAL
+static int vd55g1_g_frame_interval(struct v4l2_subdev *sd,
+				   struct v4l2_subdev_frame_interval *fi)
+{
+	struct vd55g1 *sensor = to_vd55g1(sd);
+	struct v4l2_subdev_state *state;
+	struct v4l2_rect *crop;
+	u32 line_length, frame_length;
+
+#if KERNEL_LACKS_ACTIVE_STATES
+	line_length = sensor->active_crop.width + sensor->hblank_ctrl->val;
+	frame_length = sensor->active_crop.height + sensor->vblank_ctrl->val;
+#else
+	state = v4l2_subdev_lock_and_get_active_state(sd);
+#if KERNEL_LACKS_NEW_STATES_API
+	crop = v4l2_subdev_get_pad_crop(sd, state, 0);
+#else
+	crop = v4l2_subdev_state_get_crop(state, 0);
+#endif
+	line_length = crop->width + sensor->hblank_ctrl->val;
+	frame_length = crop->height + sensor->vblank_ctrl->val;
+	v4l2_subdev_unlock_state(state);
+#endif
+
+	fi->interval.numerator = line_length * frame_length;
+	fi->interval.denominator = sensor->pixel_clock;
+
+	return 0;
+}
+#endif
+
 static const struct v4l2_subdev_video_ops vd55g1_video_ops = {
 #if KERNEL_LACKS_STREAMS_API
 	.s_stream = vd55g1_s_stream,
 #else
 	.s_stream = v4l2_subdev_s_stream_helper,
+#endif
+#ifdef KERNEL_HAS_G_FRAME_INTERVAL
+	.g_frame_interval = vd55g1_g_frame_interval,
 #endif
 };
 
