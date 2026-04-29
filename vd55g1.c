@@ -2714,7 +2714,8 @@ static int vd55g1_probe(struct i2c_client *client)
 	sensor->xclk_freq = clk_get_rate(sensor->xclk);
 	ret = vd55g1_prepare_clock_tree(sensor);
 	if (ret)
-		return ret;
+		return vd55g1_err_probe(dev, ret,
+					"Failed to prepare clock tree\n");
 
 	sensor->reset_gpio = devm_gpiod_get_optional(dev, "reset",
 						     GPIOD_OUT_HIGH);
