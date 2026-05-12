@@ -1,17 +1,19 @@
-# ST-VD55G1 Linux driver
+# ST VD55G1 Linux driver
+
+> [!TIP]
+> `vd55g1` has been **mainline** since **kernel v6.16**.
+> This repository adds extra features and support for older kernel versions.
 
 ## Supported Devices
 
-This driver supports the following devices :
-
 ### 1st generation
 
-- VD55G1 : Monochrome sensor
+- `vd55g1` : Monochrome sensor
 
 ### 2nd generation
 
-- VD55G4 : Monochrome sensor
-- VD65G4 : Color sensor
+- `vd55g4` : Monochrome sensor
+- `vd65g4` : Color sensor
 
 ## Installation
 
