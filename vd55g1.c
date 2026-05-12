@@ -764,7 +764,7 @@ static unsigned int vd55g1_get_fmt_data_type(u32 code)
 	}
 }
 
-static u32 vd55g1_get_mbus_fmt(struct vd55g1 *sensor)
+static u32 vd55g1_get_fmt_def(struct vd55g1 *sensor)
 {
 	if (sensor->version->color != VD55G1_COLOR_VERSION_BAYER)
 		return vd55g1_mbus_formats_mono[VD55G1_MBUS_CODE_IDX_DEF];
@@ -1806,7 +1806,7 @@ static int vd55g1_init_state(struct v4l2_subdev *sd,
 #endif
 
 	fmt.format.code = vd55g1_get_fmt_code(sensor,
-					      vd55g1_get_mbus_fmt(sensor));
+					      vd55g1_get_fmt_def(sensor));
 	fmt.format.width = vd55g1_supported_modes[VD55G1_MODE_IDX_DEF].width;
 	fmt.format.height = vd55g1_supported_modes[VD55G1_MODE_IDX_DEF].height;
 
@@ -2652,7 +2652,7 @@ static int vd55g1_subdev_init(struct vd55g1 *sensor)
 	vd55g1_update_pad_fmt(sensor,
 			      &vd55g1_supported_modes[VD55G1_MODE_IDX_DEF],
 			      vd55g1_get_fmt_code(sensor,
-						  vd55g1_get_mbus_fmt(sensor)),
+						  vd55g1_get_fmt_def(sensor)),
 			      &sensor->active_fmt);
 	sensor->active_crop.width =
 		vd55g1_supported_modes[VD55G1_MODE_IDX_DEF].width;
