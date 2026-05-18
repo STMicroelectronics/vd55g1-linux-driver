@@ -30,18 +30,13 @@ jobs:
     needs: build
     runs-on: ubuntu22
     if: github.ref == 'refs/heads/debian'
-    env:
-      PRISTINE_PATH: pristine
-    defaults:
-      run:
-        # Use a subfolder as debian packaging tools output to '..'
-        working-directory: $PRISTINE_PATH
 
     steps:
       - name: Check out
         uses: actions/checkout@v4
         with:
-          path: $PRISTINE_PATH
+          # Use a subfolder as debian packaging tools output to '..'
+          path: pristine
 
       - name: Setup dependencies
         run: |
@@ -65,4 +60,4 @@ jobs:
             -T ${FILE} \
             -H "X-Checksum-Sha1:${SHA1_CHECKSUM}" \
             -H "X-Checksum-MD5:${MD5_CHECKSUM}" \
-            -XPUT "https://artifactory.st.com/artifactory/imgswlinux-debian-local/pool/${MODULE_NAME}-dkms/stable/$(basename $FILE);deb.distribution=stable;deb.component=main;deb.architecture=armhf;deb.architecture=arm64"
+            -XPUT "https://artifactory.st.com/artifactory/imgswlinux-debian-local/pool/pool/${MODULE_NAME}-dkms/stable/$(basename $FILE);deb.distribution=stable;deb.component=main;deb.architecture=armhf,arm64"
