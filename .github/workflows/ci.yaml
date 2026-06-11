@@ -29,12 +29,15 @@ jobs:
     needs: build
     runs-on: ubuntu22
     if: github.ref == 'refs/heads/debian'
+    defaults:
+      run:
+        # Use a subfolder as debian packaging tools output to '..'
+        working-directory: pristine
 
     steps:
       - name: Check out
         uses: actions/checkout@v4
         with:
-          # Use a subfolder as debian packaging tools output to '..'
           path: pristine
 
       - name: Setup dependencies
