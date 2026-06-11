@@ -12,7 +12,6 @@ jobs:
 
       - name: Setup dependencies
         run: |
-          sudo apt update
           sudo apt-get install linux-headers-generic python3-ply python3-git -y
           # Running in docker we can't use 'uname -r', grab it manually
           echo "KERNEL_VERSION=$(ls /lib/modules/ | sort --version-sort --reverse | head -n 1)" >> $GITHUB_ENV
@@ -40,7 +39,6 @@ jobs:
 
       - name: Setup dependencies
         run: |
-          sudo apt update
           sudo apt-get install dkms equivs devscripts -y
 
       - name: Build package
