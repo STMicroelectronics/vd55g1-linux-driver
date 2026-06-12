@@ -5,14 +5,15 @@ on: [push]
 jobs:
   Build:
     runs-on: ubuntu22
+    container:
+      image: artifactory.st.com/imgswlinux-docker/debian_driver_pkg_x86:26.04
 
     steps:
       - name: Check out
         uses: actions/checkout@v4
 
-      - name: Setup dependencies
+      - name: Setup environment
         run: |
-          sudo apt-get install linux-headers-generic python3-ply python3-git -y
           # Running in docker we can't use 'uname -r', grab it manually
           echo "KERNEL_VERSION=$(ls /lib/modules/ | sort --version-sort --reverse | head -n 1)" >> $GITHUB_ENV
 
@@ -39,10 +40,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: pristine
-
-      - name: Setup dependencies
-        run: |
-          sudo apt-get install dkms equivs devscripts -y
 
       - name: Build package
         run: |
